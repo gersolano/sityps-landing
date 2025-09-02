@@ -6,6 +6,10 @@
     "subjectPrefix": "Preafiliación SITYPS",
     "privacyUrl": "#/aviso-privacidad"
   },
+  "recaptcha": {
+    "siteKey": "AQUI_TU_SITE_KEY_V2"
+  }
+},
   "contact": {
     "address": "Calle Niños Héroes #605-B, Barrio Ex Marquesado, Oaxaca de Juárez, Oaxaca",
     "phone": "951 971 95 88",
