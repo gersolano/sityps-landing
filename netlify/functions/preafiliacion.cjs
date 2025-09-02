@@ -1,11 +1,7 @@
-// ESM version (package.json has "type": "module")
-import fs from "fs";
-import path from "path";
-import nodemailer from "nodemailer";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+// netlify/functions/preafiliacion.cjs
+const fs = require("fs");
+const path = require("path");
+const nodemailer = require("nodemailer");
 
 let CONFIG = {};
 try {
@@ -15,7 +11,7 @@ try {
   CONFIG = {};
 }
 
-// Solo campos útiles (orden también es el default del CSV)
+// Campos que SÍ se envían/guardan (y orden por defecto CSV)
 const ALLOWED_FIELDS = [
   "nombres","apellidoPaterno","apellidoMaterno",
   "curp","rfc","nss",
@@ -25,12 +21,12 @@ const ALLOWED_FIELDS = [
   "observaciones"
 ];
 
-export async function handler(event) {
+exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
-  // 1) Parseo body
+  // 1) Parseo
   let data = {};
   try {
     const ctype = event.headers["content-type"] || "";
@@ -58,13 +54,13 @@ export async function handler(event) {
     return { statusCode: 400, body: "Debes aceptar el aviso de privacidad" };
   }
 
-  // 3) Validaciones MX básicas
+  // 3) Validaciones MX simples
   const CURP = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
   const RFC  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
   if (!CURP.test(data.curp)) return { statusCode: 400, body: "CURP inválida" };
   if (!RFC.test(data.rfc))   return { statusCode: 400, body: "RFC inválido" };
 
-  // 4) reCAPTCHA v2 si hay SECRET
+  // 4) reCAPTCHA v2 (si hay SECRET)
   if (process.env.RECAPTCHA_SECRET) {
     const token = data.recaptchaToken || data["g-recaptcha-response"];
     if (!token) return { statusCode: 400, body: "Completa el reCAPTCHA" };
@@ -85,7 +81,7 @@ export async function handler(event) {
     }
   }
 
-  // 5) Sanitizar: quitar campos internos antes de correo/CSV
+  // 5) Sanitiza: quita campos internos antes de correo/CSV
   delete data.recaptchaToken;
   delete data["g-recaptcha-response"];
   delete data.privacyAccepted;
@@ -122,10 +118,10 @@ Fecha/hora: ${submittedAt}
 
 ${JSON.stringify(cleaned, null, 2)}
 
--- 
+--
 Este mensaje fue enviado desde sityps.org.mx`;
 
-  // 7) CSV con orden configurable
+  // 7) CSV
   const headersOrder = Array.isArray(CONFIG.csv?.order) && CONFIG.csv.order.length
     ? CONFIG.csv.order.filter(k => ALLOWED_FIELDS.includes(k))
     : ALLOWED_FIELDS;
@@ -134,7 +130,6 @@ Este mensaje fue enviado desde sityps.org.mx`;
   const csvLine = headers.map((k) => `"${String(cleaned[k] ?? "").replace(/"/g, '""')}"`).join(",");
   const csv = `${headers.join(",")}\n${csvLine}\n`;
 
-  // 8) Envío
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
@@ -151,4 +146,4 @@ Este mensaje fue enviado desde sityps.org.mx`;
     });
     return { statusCode: 500, body: "No se pudo enviar el correo" };
   }
-}
+};
