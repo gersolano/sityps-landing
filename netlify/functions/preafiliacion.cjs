@@ -3,6 +3,29 @@ const fs = require("fs");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
+/* ---------- utilidades de respuesta ---------- */
+function json(code, obj) {
+  return {
+    statusCode: code,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+    body: JSON.stringify(obj),
+  };
+}
+function text(code, message) {
+  return {
+    statusCode: code,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+    body: message,
+  };
+}
+
+/* ---------- configuración opcional local ---------- */
 let CONFIG = {};
 try {
   const cfgPath = path.join(__dirname, "..", "..", "sityps.config.json");
@@ -11,25 +34,26 @@ try {
   CONFIG = {};
 }
 
-// Campos que SÍ se envían/guardan (y orden por defecto CSV)
+/* ---------- campos permitidos / orden CSV ---------- */
 const ALLOWED_FIELDS = [
-  "nombres","apellidoPaterno","apellidoMaterno",
-  "curp","rfc","nss",
-  "telefono","correo",
-  "seccion","empresa",
-  "domicilio","municipio","estado",
-  "observaciones"
+  "nombres", "apellidoPaterno", "apellidoMaterno",
+  "curp", "rfc", "nss",
+  "telefono", "correo",
+  "seccion", "empresa",
+  "domicilio", "municipio", "estado",
+  "observaciones",
 ];
 
+/* =================== HANDLER =================== */
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+    return text(405, "Method Not Allowed");
   }
 
-  // 1) Parseo
+  // 1) Parseo body
   let data = {};
   try {
-    const ctype = event.headers["content-type"] || "";
+    const ctype = (event.headers["content-type"] || "").toLowerCase();
     if (ctype.includes("application/json")) {
       data = JSON.parse(event.body || "{}");
     } else if (ctype.includes("application/x-www-form-urlencoded")) {
@@ -38,50 +62,50 @@ exports.handler = async (event) => {
       data = JSON.parse(event.body || "{}");
     }
   } catch {
-    return { statusCode: 400, body: "Cuerpo inválido" };
+    return text(400, "Cuerpo inválido");
   }
 
-  // 2) Reglas mínimas
+  // 2) Validaciones mínimas
   const required = [
     "nombres","apellidoPaterno","apellidoMaterno",
     "curp","rfc","telefono","correo",
-    "seccion","empresa","domicilio","municipio","estado"
+    "seccion","empresa","domicilio","municipio","estado",
   ];
   for (const k of required) {
-    if (!data[k]) return { statusCode: 400, body: `Falta ${k}` };
+    if (!data[k]) return text(400, `Falta ${k}`);
   }
   if (!data.privacyAccepted || String(data.privacyAccepted).toLowerCase() === "false") {
-    return { statusCode: 400, body: "Debes aceptar el aviso de privacidad" };
+    return text(400, "Debes aceptar el aviso de privacidad");
   }
 
-  // 3) Validaciones MX simples
+  // 3) Validaciones simples MX
   const CURP = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
   const RFC  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
-  if (!CURP.test(data.curp)) return { statusCode: 400, body: "CURP inválida" };
-  if (!RFC.test(data.rfc))   return { statusCode: 400, body: "RFC inválido" };
+  if (!CURP.test(data.curp)) return text(400, "CURP inválida");
+  if (!RFC.test(data.rfc))   return text(400, "RFC inválido");
 
-  // 4) reCAPTCHA v2 (si hay SECRET)
+  // 4) Verificar reCAPTCHA v2 si hay SECRET
   if (process.env.RECAPTCHA_SECRET) {
     const token = data.recaptchaToken || data["g-recaptcha-response"];
-    if (!token) return { statusCode: 400, body: "Completa el reCAPTCHA" };
+    if (!token) return text(400, "Completa el reCAPTCHA");
     try {
       const params = new URLSearchParams({
         secret: process.env.RECAPTCHA_SECRET,
-        response: token
+        response: token,
       });
       const resp = await fetch("https://www.google.com/recaptcha/api/siteverify", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params.toString()
+        body: params.toString(),
       });
       const verify = await resp.json();
-      if (!verify.success) return { statusCode: 400, body: "Falló reCAPTCHA" };
+      if (!verify.success) return text(400, "Falló reCAPTCHA");
     } catch {
-      return { statusCode: 400, body: "Error al verificar reCAPTCHA" };
+      return text(400, "Error al verificar reCAPTCHA");
     }
   }
 
-  // 5) Sanitiza: quita campos internos antes de correo/CSV
+  // 5) Sanitizar (no enviar campos internos)
   delete data.recaptchaToken;
   delete data["g-recaptcha-response"];
   delete data.privacyAccepted;
@@ -103,9 +127,9 @@ exports.handler = async (event) => {
     await transporter.verify();
   } catch (e) {
     console.error("SMTP verify failed:", {
-      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message
+      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message,
     });
-    return { statusCode: 500, body: "SMTP no disponible (verify failed)" };
+    return text(500, "SMTP no disponible (verify failed)");
   }
 
   const to = process.env.TO_ACTAS || CONFIG.emails?.toActas || "actas@sityps.org.mx";
@@ -123,13 +147,14 @@ Este mensaje fue enviado desde sityps.org.mx`;
 
   // 7) CSV
   const headersOrder = Array.isArray(CONFIG.csv?.order) && CONFIG.csv.order.length
-    ? CONFIG.csv.order.filter(k => ALLOWED_FIELDS.includes(k))
+    ? CONFIG.csv.order.filter((k) => ALLOWED_FIELDS.includes(k))
     : ALLOWED_FIELDS;
 
-  const headers = headersOrder.filter(k => Object.prototype.hasOwnProperty.call(cleaned, k));
+  const headers = headersOrder.filter((k) => Object.prototype.hasOwnProperty.call(cleaned, k));
   const csvLine = headers.map((k) => `"${String(cleaned[k] ?? "").replace(/"/g, '""')}"`).join(",");
   const csv = `${headers.join(",")}\n${csvLine}\n`;
 
+  // 8) Enviar correo
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
@@ -139,11 +164,11 @@ Este mensaje fue enviado desde sityps.org.mx`;
       text: cuerpo,
       attachments: [{ filename: "preafiliacion.csv", content: csv, contentType: "text/csv" }],
     });
-    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    return json(200, { ok: true });
   } catch (e) {
     console.error("Mailer error:", {
-      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message
+      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message,
     });
-    return { statusCode: 500, body: "No se pudo enviar el correo" };
+    return text(500, "No se pudo enviar el correo");
   }
 };
