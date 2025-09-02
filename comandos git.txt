@@ -1,3 +1,15 @@
+
+git remote remove origin 2>$null
+git remote add origin https://github.com/gersolano/sityps-landing.git
+git push -u origin main
+
+
+
+
+
+
+
+
 o initialize a new git repo follow the steps below.
 
 1. Initialize a new repo:
