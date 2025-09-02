@@ -37,40 +37,44 @@ exports.handler = async (event) => {
   if (!CURP.test(data.curp)) return { statusCode: 400, body: "CURP inválida" };
   if (!RFC.test(data.rfc))   return { statusCode: 400, body: "RFC inválido" };
 
+    // SMTP (usa solo variables de entorno para secretos)
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 465),
-    secure: Number(process.env.SMTP_PORT || 465) === 465,
+    secure: Number(process.env.SMTP_PORT || 465) === 465, // true si 465
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
-  const to = process.env.TO_ACTAS || "actas@sityps.org.mx";
-  const subject = `${process.env.SUBJECT_PREFIX || "Preafiliación"} - ${data.apellidoPaterno} ${data.apellidoMaterno}, ${data.nombres}`;
+  // Diagnóstico opcional
+  try {
+    await transporter.verify();
+  } catch (e) {
+    console.error("SMTP verify failed:", {
+      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message
+    });
+    return { statusCode: 500, body: "SMTP no disponible (verify failed)" };
+  }
 
-  const cuerpo = `Nueva solicitud de preafiliación:
+  const to = process.env.TO_ACTAS || CONFIG.emails?.toActas || "actas@sityps.org.mx";
+  const subjectPrefix = process.env.SUBJECT_PREFIX || CONFIG.site?.subjectPrefix || "Preafiliación";
+  const subject = `${subjectPrefix} - ${data.apellidoPaterno} ${data.apellidoMaterno}, ${data.nombres}`;
 
-${JSON.stringify(data, null, 2)}
-
---
-Este mensaje fue enviado desde sityps.org.mx`;
-
-  // CSV (una fila) para importar a Access
-  const headers = Object.keys(data);
-  const csvLine = headers.map((k) => `"${String(data[k] ?? "").replace(/"/g,'""')}"`).join(",");
-  const csv = `${headers.join(",")}\n${csvLine}\n`;
+  // ... (cuerpo + csv igual que antes)
 
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
       to,
-      cc: process.env.CC || undefined,
+      cc: process.env.CC || CONFIG.emails?.cc || undefined,
       subject,
       text: cuerpo,
       attachments: [{ filename: "preafiliacion.csv", content: csv, contentType: "text/csv" }],
     });
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (e) {
-    console.error("Mailer error:", e);
+    console.error("Mailer error:", {
+      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message
+    });
     return { statusCode: 500, body: "No se pudo enviar el correo" };
   }
-};
+
