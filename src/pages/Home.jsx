@@ -4,17 +4,13 @@ import cfg from "../../sityps.config.json";
 export default function Home() {
   return (
     <main>
-      {/* Hero rojo con logo grande y texto institucional */}
-      <section className="relative">
-        <div className="bg-gradient-to-br from-primary-900 via-primary-800 to-primary-700">
-          <div className="mx-auto max-w-6xl px-4 py-12 text-white">
+      {/* Hero rojo oscuro con leve transparencia */}
+      <section className="relative overflow-hidden">
+        <div className="bg-gradient-to-br from-primary-950 via-primary-900 to-primary-800">
+          <div className="absolute inset-0 bg-white/5 pointer-events-none" /> {/* capa translúcida */}
+          <div className="relative mx-auto max-w-6xl px-4 py-12 text-white">
             <div className="flex items-center gap-6">
-              <img
-                src="/logot.png"
-                onError={(e)=>{ e.currentTarget.src="/logo.png"; }}
-                alt="SITYPS"
-                className="h-32 w-auto"  /* ~3.5 cm (≈ 132px) */
-              />
+              <img src="/logo.png" alt="SITYPS" className="h-32 w-auto" />
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold leading-tight">
                   SINDICATO INDEPENDIENTE DE TRABAJADORES Y PROFESIONALES EN SALUD (SITYPS)
@@ -32,7 +28,7 @@ export default function Home() {
                  className="rounded-lg bg-white text-primary-800 px-5 py-2 text-sm font-semibold hover:bg-primary-50">
                 Iniciar preafiliación
               </a>
-              <a href="#/mision" className="rounded-lg border border-primary-200 px-5 py-2 text-sm text-white hover:bg-primary-600/30">
+              <a href="#/mision" className="rounded-lg border border-primary-200 px-5 py-2 text-sm text-white hover:bg-white/10">
                 Conoce nuestra misión
               </a>
             </div>
@@ -40,7 +36,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Tarjetas de bienvenida / imágenes (puedes sustituir src por tus fotos) */}
+      {/* Tarjetas ilustrativas (coloca tus imágenes en /public/img) */}
       <section className="mx-auto max-w-6xl px-4 -mt-8 pb-10">
         <div className="grid md:grid-cols-3 gap-6">
           {[
@@ -50,7 +46,8 @@ export default function Home() {
           ].map((c)=>(
             <article key={c.title} className="rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-card">
               <div className="h-40 bg-slate-100">
-                <img src={c.img} alt={c.title} className="h-full w-full object-cover" onError={(e)=>{e.currentTarget.style.display='none';}}/>
+                <img src={c.img} alt={c.title} className="h-full w-full object-cover"
+                     onError={(e)=>{e.currentTarget.style.display='none';}}/>
               </div>
               <div className="p-4">
                 <h3 className="font-semibold">{c.title}</h3>

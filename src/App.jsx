@@ -23,7 +23,7 @@ function useHashRoute() {
   return route.startsWith("/") ? route : `/${route}`;
 }
 
-/* Transición simple */
+/* Transición */
 function Fade({ route, children }) {
   const [show, setShow] = React.useState(false);
   React.useEffect(() => { const t = setTimeout(() => setShow(true), 10); return () => clearTimeout(t); }, [route]);
@@ -46,8 +46,7 @@ function Header() {
     <header className="border-b bg-white sticky top-0 z-20">
       <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
         <a href="#/" className="flex items-center gap-3 shrink-0">
-          <img src={cfg.site?.logo || "/logot.png"} alt="SITYPS" className="h-10 w-auto"
-               onError={(e)=>{ e.currentTarget.src="/logo.png"; }}/>
+          <img src="/logo.png" alt="SITYPS" className="h-10 w-auto" />
           <span className="text-lg font-semibold tracking-tight text-slate-800">SITYPS</span>
         </a>
         <nav className="hidden md:flex items-center gap-5 text-sm">
