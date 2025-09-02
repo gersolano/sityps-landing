@@ -37,7 +37,7 @@ exports.handler = async (event) => {
   if (!CURP.test(data.curp)) return { statusCode: 400, body: "CURP inválida" };
   if (!RFC.test(data.rfc))   return { statusCode: 400, body: "RFC inválido" };
 
-    // SMTP (usa solo variables de entorno para secretos)
+      // SMTP (usa solo variables de entorno para secretos)
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 465),
@@ -45,7 +45,7 @@ exports.handler = async (event) => {
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
-  // Diagnóstico opcional
+  // Diagnóstico previo: verifica credenciales/conexión
   try {
     await transporter.verify();
   } catch (e) {
@@ -59,7 +59,7 @@ exports.handler = async (event) => {
   const subjectPrefix = process.env.SUBJECT_PREFIX || CONFIG.site?.subjectPrefix || "Preafiliación";
   const subject = `${subjectPrefix} - ${data.apellidoPaterno} ${data.apellidoMaterno}, ${data.nombres}`;
 
-  // ... (cuerpo + csv igual que antes)
+  // …cuerpo + CSV igual que antes…
 
   try {
     await transporter.sendMail({
