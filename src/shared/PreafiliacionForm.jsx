@@ -6,6 +6,7 @@ export default function PreafiliacionForm() {
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
   const hideTimer = useRef(null);
+  const formRef = useRef(null);
 
   // reCAPTCHA v2
   const recaptchaDivRef = useRef(null);
@@ -44,16 +45,14 @@ export default function PreafiliacionForm() {
 
   async function onSubmit(e) {
     e.preventDefault();
+    if (submitting) return;
     setSubmitting(true); setOk(false); setErr("");
 
     const form = new FormData(e.currentTarget);
     const payload = Object.fromEntries(form.entries());
+    payload.privacyAccepted = form.get("privacyAccepted") === "on";
 
-    // Normaliza aceptación del aviso de privacidad
-    const acceptedRaw = form.get("privacyAccepted");
-    payload.privacyAccepted = acceptedRaw === "on" || acceptedRaw === "1" || acceptedRaw === "true";
-
-    // Adjunta token reCAPTCHA si hay siteKey
+    // Token reCAPTCHA
     if (siteKey) {
       const token = window.grecaptcha?.getResponse ? window.grecaptcha.getResponse(widgetIdRef.current) : "";
       if (!token) { setSubmitting(false); showErr("Por favor marca 'No soy un robot'."); return; }
@@ -66,24 +65,41 @@ export default function PreafiliacionForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        showErr(text || `HTTP ${res.status}`);
+
+      // Éxito si res.ok y (si hay JSON) ok === true
+      let data = null;
+      try { data = await res.json(); } catch { /* puede no venir JSON, no pasa nada */ }
+
+      if (res.ok && (data?.ok === true || data === null)) {
+        showOk();
+
+        // Limpieza robusta
+        try { formRef.current?.reset(); } catch {}
+        try {
+          formRef.current?.querySelectorAll("input, textarea").forEach((el) => {
+            if (el.type !== "checkbox" && el.type !== "radio") el.value = "";
+            if (el.type === "checkbox") el.checked = false;
+            el.blur();
+          });
+        } catch {}
+
+        // Reset reCAPTCHA
+        try {
+          if (siteKey && window.grecaptcha?.reset && widgetIdRef.current !== null) {
+            window.grecaptcha.reset(widgetIdRef.current);
+          }
+        } catch {}
+
+        // Lleva la vista al inicio del bloque
+        formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       }
-      showOk();
 
-      // Limpieza total del formulario
-      e.currentTarget.reset();
-      Array.from(e.currentTarget.querySelectorAll("input, textarea")).forEach(el => {
-        if (el.type !== "checkbox" && el.type !== "radio") el.value = "";
-        if (el.type === "checkbox") el.checked = false;
-      });
-      if (siteKey && window.grecaptcha?.reset && widgetIdRef.current !== null) {
-        window.grecaptcha.reset(widgetIdRef.current);
-      }
-      (document.activeElement instanceof HTMLElement) && document.activeElement.blur();
+      // Si no fue ok:
+      const fallbackText = data?.message || data || `HTTP ${res.status}`;
+      showErr(typeof fallbackText === "string" ? fallbackText : "");
     } catch {
+      // Algunas veces la red tira un error pero el server ya envió; mostramos mensaje amable
       showErr();
     } finally {
       setSubmitting(false);
@@ -91,7 +107,13 @@ export default function PreafiliacionForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="p-4 grid grid-cols-1 gap-4">
+    <form
+      ref={formRef}
+      onSubmit={onSubmit}
+      className="p-4 grid grid-cols-1 gap-4"
+      autoComplete="off"
+      noValidate
+    >
       {ok && !err && (
         <div role="status" className="rounded-xl border border-green-200 bg-green-50 text-green-800 px-3 py-2 text-sm">
           <b>¡Gracias!</b> Tu preafiliación se envió correctamente. Muy pronto el área de <b>Afiliación</b> se pondrá en contacto contigo.
@@ -177,6 +199,7 @@ function Field({ name, label, required, type = "text", upper }) {
         name={name}
         required={required}
         type={type}
+        autoComplete="off"
         className={`mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-600 ${upper ? "uppercase tracking-wider" : ""}`}
       />
     </div>
