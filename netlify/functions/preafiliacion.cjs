@@ -3,52 +3,38 @@ const fs = require("fs");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
-/* ---------- utilidades de respuesta ---------- */
-function json(code, obj) {
+/* ---------- helpers de respuesta (JSON SIEMPRE) ---------- */
+function j(code, ok, message, extra = {}) {
   return {
     statusCode: code,
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
     },
-    body: JSON.stringify(obj),
-  };
-}
-function text(code, message) {
-  return {
-    statusCode: code,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-    body: message,
+    body: JSON.stringify({ ok, message, ...extra }),
   };
 }
 
-/* ---------- configuración opcional local ---------- */
+/* ---------- config opcional local ---------- */
 let CONFIG = {};
 try {
   const cfgPath = path.join(__dirname, "..", "..", "sityps.config.json");
   CONFIG = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-} catch {
-  CONFIG = {};
-}
+} catch { CONFIG = {}; }
 
 /* ---------- campos permitidos / orden CSV ---------- */
 const ALLOWED_FIELDS = [
-  "nombres", "apellidoPaterno", "apellidoMaterno",
-  "curp", "rfc", "nss",
-  "telefono", "correo",
-  "seccion", "empresa",
-  "domicilio", "municipio", "estado",
+  "nombres","apellidoPaterno","apellidoMaterno",
+  "curp","rfc","nss",
+  "telefono","correo",
+  "seccion","empresa",
+  "domicilio","municipio","estado",
   "observaciones",
 ];
 
 /* =================== HANDLER =================== */
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return text(405, "Method Not Allowed");
-  }
+  if (event.httpMethod !== "POST") return j(405, false, "Method Not Allowed");
 
   // 1) Parseo body
   let data = {};
@@ -62,58 +48,53 @@ exports.handler = async (event) => {
       data = JSON.parse(event.body || "{}");
     }
   } catch {
-    return text(400, "Cuerpo inválido");
+    return j(400, false, "Cuerpo inválido");
   }
 
-  // 2) Validaciones mínimas
+  // 2) Reglas mínimas
   const required = [
     "nombres","apellidoPaterno","apellidoMaterno",
     "curp","rfc","telefono","correo",
     "seccion","empresa","domicilio","municipio","estado",
   ];
   for (const k of required) {
-    if (!data[k]) return text(400, `Falta ${k}`);
+    if (!data[k]) return j(400, false, `Falta ${k}`);
   }
   if (!data.privacyAccepted || String(data.privacyAccepted).toLowerCase() === "false") {
-    return text(400, "Debes aceptar el aviso de privacidad");
+    return j(400, false, "Debes aceptar el aviso de privacidad");
   }
 
-  // 3) Validaciones simples MX
+  // 3) Validaciones MX
   const CURP = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
   const RFC  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
-  if (!CURP.test(data.curp)) return text(400, "CURP inválida");
-  if (!RFC.test(data.rfc))   return text(400, "RFC inválido");
+  if (!CURP.test(data.curp)) return j(400, false, "CURP inválida");
+  if (!RFC.test(data.rfc))   return j(400, false, "RFC inválido");
 
-  // 4) Verificar reCAPTCHA v2 si hay SECRET
+  // 4) reCAPTCHA v2 (si está configurado)
   if (process.env.RECAPTCHA_SECRET) {
     const token = data.recaptchaToken || data["g-recaptcha-response"];
-    if (!token) return text(400, "Completa el reCAPTCHA");
+    if (!token) return j(400, false, "Completa el reCAPTCHA");
     try {
-      const params = new URLSearchParams({
-        secret: process.env.RECAPTCHA_SECRET,
-        response: token,
-      });
+      const params = new URLSearchParams({ secret: process.env.RECAPTCHA_SECRET, response: token });
       const resp = await fetch("https://www.google.com/recaptcha/api/siteverify", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: params.toString(),
       });
       const verify = await resp.json();
-      if (!verify.success) return text(400, "Falló reCAPTCHA");
+      if (!verify.success) return j(400, false, "Falló reCAPTCHA");
     } catch {
-      return text(400, "Error al verificar reCAPTCHA");
+      return j(400, false, "Error al verificar reCAPTCHA");
     }
   }
 
-  // 5) Sanitizar (no enviar campos internos)
+  // 5) Sanitizar: quitar internos
   delete data.recaptchaToken;
   delete data["g-recaptcha-response"];
   delete data.privacyAccepted;
 
   const cleaned = {};
-  for (const k of ALLOWED_FIELDS) {
-    if (data[k] !== undefined) cleaned[k] = data[k];
-  }
+  for (const k of ALLOWED_FIELDS) if (data[k] !== undefined) cleaned[k] = data[k];
 
   // 6) SMTP
   const transporter = nodemailer.createTransport({
@@ -123,13 +104,10 @@ exports.handler = async (event) => {
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
-  try {
-    await transporter.verify();
-  } catch (e) {
-    console.error("SMTP verify failed:", {
-      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message,
-    });
-    return text(500, "SMTP no disponible (verify failed)");
+  try { await transporter.verify(); }
+  catch (e) {
+    console.error("SMTP verify failed:", { code: e.code, msg: e.message });
+    return j(500, false, "SMTP no disponible (verify failed)");
   }
 
   const to = process.env.TO_ACTAS || CONFIG.emails?.toActas || "actas@sityps.org.mx";
@@ -154,7 +132,7 @@ Este mensaje fue enviado desde sityps.org.mx`;
   const csvLine = headers.map((k) => `"${String(cleaned[k] ?? "").replace(/"/g, '""')}"`).join(",");
   const csv = `${headers.join(",")}\n${csvLine}\n`;
 
-  // 8) Enviar correo
+  // 8) Enviar
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
@@ -164,11 +142,9 @@ Este mensaje fue enviado desde sityps.org.mx`;
       text: cuerpo,
       attachments: [{ filename: "preafiliacion.csv", content: csv, contentType: "text/csv" }],
     });
-    return json(200, { ok: true });
+    return j(200, true, "OK");
   } catch (e) {
-    console.error("Mailer error:", {
-      code: e.code, responseCode: e.responseCode, command: e.command, message: e.message,
-    });
-    return text(500, "No se pudo enviar el correo");
+    console.error("Mailer error:", { code: e.code, msg: e.message });
+    return j(500, false, "No se pudo enviar el correo");
   }
 };
