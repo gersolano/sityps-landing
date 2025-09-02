@@ -6,6 +6,7 @@ export default function PreafiliacionForm() {
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [captchaOk, setCaptchaOk] = useState(false);
   const hideTimer = useRef(null);
   const formRef = useRef(null);
   const confirmBtnRef = useRef(null);
@@ -26,7 +27,19 @@ export default function PreafiliacionForm() {
     }
     const t = setInterval(() => {
       if (window.grecaptcha && !widgetIdRef.current && recaptchaDivRef.current) {
-        widgetIdRef.current = window.grecaptcha.render(recaptchaDivRef.current, { sitekey: siteKey, theme: "light" });
+        widgetIdRef.current = window.grecaptcha.render(recaptchaDivRef.current, {
+          sitekey: siteKey,
+          theme: "light",
+          callback: () => setCaptchaOk(true),                    // marcado ok
+          "expired-callback": () => {                            // expiró el token
+            setCaptchaOk(false);
+            showErr("La verificación del reCAPTCHA caducó. Vuelve a marcar la casilla.");
+          },
+          "error-callback": () => {                              // error de widget
+            setCaptchaOk(false);
+            showErr("Hubo un problema con reCAPTCHA. Vuelve a marcar la casilla.");
+          },
+        });
         clearInterval(t);
       }
     }, 300);
@@ -48,16 +61,24 @@ export default function PreafiliacionForm() {
   async function onSubmit(e) {
     e.preventDefault();
     if (submitting) return;
+
     setSubmitting(true); setOk(false); setErr("");
 
     const form = new FormData(e.currentTarget);
     const payload = Object.fromEntries(form.entries());
     payload.privacyAccepted = form.get("privacyAccepted") === "on";
 
-    // Token reCAPTCHA
+    // Token reCAPTCHA v2
     if (siteKey) {
-      const token = window.grecaptcha?.getResponse ? window.grecaptcha.getResponse(widgetIdRef.current) : "";
-      if (!token) { setSubmitting(false); showErr("Por favor marca 'No soy un robot'."); return; }
+      const token = window.grecaptcha?.getResponse
+        ? window.grecaptcha.getResponse(widgetIdRef.current)
+        : "";
+      if (!token) {
+        setSubmitting(false);
+        setCaptchaOk(false);
+        showErr("Por favor marca 'No soy un robot'.");
+        return;
+      }
       payload.recaptchaToken = token;
     }
 
@@ -68,13 +89,17 @@ export default function PreafiliacionForm() {
         body: JSON.stringify(payload),
       });
 
-      let data = null;
-      try { data = await res.json(); } catch {}
+      // Intenta JSON, si falla lee texto
+      let payloadMsg = null;
+      let isJson = false;
+      try { payloadMsg = await res.json(); isJson = true; } catch {
+        try { payloadMsg = await res.text(); } catch { payloadMsg = null; }
+      }
 
-      if (res.ok && (data?.ok === true || data === null)) {
+      if (res.ok && (isJson ? payloadMsg?.ok === true : true)) {
         showOk();
 
-        // Limpieza
+        // Limpieza total
         try { formRef.current?.reset(); } catch {}
         try {
           formRef.current?.querySelectorAll("input, textarea").forEach((el) => {
@@ -83,23 +108,37 @@ export default function PreafiliacionForm() {
             el.blur();
           });
         } catch {}
+
+        // Reset reCAPTCHA
         try {
           if (siteKey && window.grecaptcha?.reset && widgetIdRef.current !== null) {
             window.grecaptcha.reset(widgetIdRef.current);
           }
+          setCaptchaOk(false);
         } catch {}
-        formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-        // Muestra modal y enfoca botón
+        formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         setShowModal(true);
         setTimeout(() => { confirmBtnRef.current?.focus(); }, 50);
         return;
       }
 
-      const fallbackText = data?.message || data || `HTTP ${res.status}`;
-      showErr(typeof fallbackText === "string" ? fallbackText : "");
+      // ERROR → muestra mensaje real y resetea captcha si aplica
+      const msg = isJson
+        ? (payloadMsg?.message || "No se pudo enviar la solicitud.")
+        : (typeof payloadMsg === "string" && payloadMsg.trim().length ? payloadMsg : `HTTP ${res.status}`);
+
+      if (/reCAPTCHA|captcha/i.test(msg) || res.status === 400) {
+        try {
+          if (siteKey && window.grecaptcha?.reset && widgetIdRef.current !== null) {
+            window.grecaptcha.reset(widgetIdRef.current);
+          }
+          setCaptchaOk(false);
+        } catch {}
+      }
+      showErr(msg);
     } catch {
-      showErr();
+      showErr(); // red falló (aunque el mail podría haber salido)
     } finally {
       setSubmitting(false);
     }
@@ -107,8 +146,7 @@ export default function PreafiliacionForm() {
 
   function handleModalAccept() {
     setShowModal(false);
-    // refresh completo como pediste
-    window.location.reload();
+    window.location.reload(); // refresh completo
   }
 
   return (
