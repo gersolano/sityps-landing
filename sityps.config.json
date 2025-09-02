@@ -1,0 +1,73 @@
+{
+  "site": {
+    "name": "SITYPS",
+    "logo": "/logo.svg",
+    "motto": "Luchando siempre, unidos venceremos",
+    "subjectPrefix": "Preafiliación SITYPS",
+    "privacyUrl": "#/aviso-privacidad"
+  },
+  "contact": {
+    "address": "Calle Niños Héroes #605-B, Barrio Ex Marquesado, Oaxaca de Juárez, Oaxaca",
+    "phone": "951 971 95 88",
+    "email": "secretariageneralsityps@gmail.com",
+    "social": {
+      "facebook": "Sityps Oficial Oaxaca",
+      "tiktok": "sityps_oficial_oaxaca"
+    }
+  },
+  "content": {
+    "mission": "Ser el Sindicato que proteja y luche por el bienestar constante de los trabajadores del sector salud, público y privado, luchando siempre por mejores condiciones laborales, de salud, sociales y económicas de cada trabajador y su familia; siempre apegados a la legalidad y ejerciendo nuestros derechos políticos-sindicales.",
+    "vision": "Consolidarnos como la primer Organización Sindical verdaderamente democrática, garantizando el mejoramiento de las condiciones de vida de nuestros afiliados, con vocación de servicio, compromiso, rostro humano, liderazgos sindicales honestos, leales y solidarios.",
+    "principles": ["Justicia", "Libertad", "Democracia", "Igualdad"],
+    "values": ["Respeto", "Responsabilidad", "Solidaridad", "Compromiso", "Transparencia", "Lealtad"],
+    "achievements": [
+      "Respeto a procesos escalafonarios del sindicato",
+      "Nombramientos definitivos por medio de laudos",
+      "Corrección de la base de cálculo de prestaciones económicas",
+      "Reincorporación de personal rescindido por laudos",
+      "Cambios de adscripción"
+    ],
+    "community": [
+      "Consultorio dental: odontología integral a bajo costo con especialistas por convenios",
+      "Brigadas médico-odontológicas en distintos puntos del estado"
+    ],
+    "affiliateBullets": [
+      "Defensa de derechos laborales y representación ante autoridades",
+      "Asesoría y acompañamiento jurídico-laboral",
+      "Negociación de condiciones de trabajo y vigilancia de su cumplimiento",
+      "Formación sindical, jurídica e institucional"
+    ]
+  },
+  "directory": {
+    "comiteEjecutivo": [
+      ["M.A.H. Laura Cerqueda de la Rosa", "Secretaria General"],
+      ["Fredi Fernando Vázquez Aguilar", "Secretario de Organización, Actas y Acuerdos"],
+      ["Carlos Alberto Ramírez Cruz", "Secretario de Asuntos Laborales"],
+      ["Eduardo Escobar Vásquez", "Secretario de Formación, Capacitación y Desarrollo Profesional"],
+      ["Dalia Noguera Ruiz", "Secretario de Seguridad y Previsión Social"],
+      ["Otoniel Gerson Solano Talledos", "Secretario de Escalafón y Promoción de Plazas"],
+      ["Lidia Elisa Olivares", "Secretaria de Finanzas"],
+      ["Saidel Mateos Vicente", "Secretario de Créditos, Vivienda y Prestaciones Económicas"],
+      ["Beatriz Adriana Castellanos López", "Secretaria de Fomento Cultural y Deportivo"],
+      ["Petra Remedios Hernández Velasco", "Secretaria de la Mujer y Equidad de Género"]
+    ],
+    "organos": [
+      ["Comité de Vigilancia, Honor y Justicia", "Juan Altamirano Vásquez (Presidente)"],
+      ["Comité Electoral", "Eva Sánchez Pérez (Presidenta)"]
+    ]
+  },
+  "modules": {
+    "afiliacion":   { "href": "#preafiliacion-form", "docs": "#" },
+    "cuotas":       { "href": "#", "docs": "#" },
+    "finanzas":     { "href": "#", "docs": "#" },
+    "demandas":     { "href": "#", "docs": "#" },
+    "consultorios": { "href": "#", "docs": "#" },
+    "miscelanea":   { "href": "#", "docs": "#" }
+  },
+  "csv": {
+    "order": [
+      "nombres","apellidoPaterno","apellidoMaterno","curp","rfc","telefono",
+      "correo","seccion","empresa","domicilio","municipio","estado","nss","observaciones","privacyAccepted"
+    ]
+  }
+}
