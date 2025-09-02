@@ -1,15 +1,14 @@
 {
   "site": {
     "name": "SITYPS",
-    "logo": "/logo.svg",
+    "logo": "/logo.png",
     "motto": "Luchando siempre, unidos venceremos",
     "subjectPrefix": "Preafiliación SITYPS",
     "privacyUrl": "#/aviso-privacidad"
   },
   "recaptcha": {
-    "siteKey": "AQUI_TU_SITE_KEY_V2"
-  }
-},
+    "siteKey": "6Ldm17srAAAAAH5hHWc62ftUldXu3NNvVEKpbaTP" 
+  },
   "contact": {
     "address": "Calle Niños Héroes #605-B, Barrio Ex Marquesado, Oaxaca de Juárez, Oaxaca",
     "phone": "951 971 95 88",
@@ -58,20 +57,6 @@
     "organos": [
       ["Comité de Vigilancia, Honor y Justicia", "Juan Altamirano Vásquez (Presidente)"],
       ["Comité Electoral", "Eva Sánchez Pérez (Presidenta)"]
-    ]
-  },
-  "modules": {
-    "afiliacion":   { "href": "#preafiliacion-form", "docs": "#" },
-    "cuotas":       { "href": "#", "docs": "#" },
-    "finanzas":     { "href": "#", "docs": "#" },
-    "demandas":     { "href": "#", "docs": "#" },
-    "consultorios": { "href": "#", "docs": "#" },
-    "miscelanea":   { "href": "#", "docs": "#" }
-  },
-  "csv": {
-    "order": [
-      "nombres","apellidoPaterno","apellidoMaterno","curp","rfc","telefono",
-      "correo","seccion","empresa","domicilio","municipio","estado","nss","observaciones","privacyAccepted"
     ]
   }
 }

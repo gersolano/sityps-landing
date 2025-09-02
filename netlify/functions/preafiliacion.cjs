@@ -1,7 +1,11 @@
-// netlify/functions/preafiliacion.js
-const fs = require("fs");
-const path = require("path");
-const nodemailer = require("nodemailer");
+// ESM version (package.json has "type": "module")
+import fs from "fs";
+import path from "path";
+import nodemailer from "nodemailer";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
 
 let CONFIG = {};
 try {
@@ -11,11 +15,22 @@ try {
   CONFIG = {};
 }
 
-exports.handler = async (event) => {
+// Solo campos útiles (orden también es el default del CSV)
+const ALLOWED_FIELDS = [
+  "nombres","apellidoPaterno","apellidoMaterno",
+  "curp","rfc","nss",
+  "telefono","correo",
+  "seccion","empresa",
+  "domicilio","municipio","estado",
+  "observaciones"
+];
+
+export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
+  // 1) Parseo body
   let data = {};
   try {
     const ctype = event.headers["content-type"] || "";
@@ -30,6 +45,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: "Cuerpo inválido" };
   }
 
+  // 2) Reglas mínimas
   const required = [
     "nombres","apellidoPaterno","apellidoMaterno",
     "curp","rfc","telefono","correo",
@@ -42,16 +58,16 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: "Debes aceptar el aviso de privacidad" };
   }
 
-  // Validaciones básicas MX
+  // 3) Validaciones MX básicas
   const CURP = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
   const RFC  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
   if (!CURP.test(data.curp)) return { statusCode: 400, body: "CURP inválida" };
   if (!RFC.test(data.rfc))   return { statusCode: 400, body: "RFC inválido" };
 
-  // reCAPTCHA v2 (opcional si hay SECRET)
+  // 4) reCAPTCHA v2 si hay SECRET
   if (process.env.RECAPTCHA_SECRET) {
     const token = data.recaptchaToken || data["g-recaptcha-response"];
-    if (!token) return { statusCode: 400, body: "Completa el reCAPTCHA." };
+    if (!token) return { statusCode: 400, body: "Completa el reCAPTCHA" };
     try {
       const params = new URLSearchParams({
         secret: process.env.RECAPTCHA_SECRET,
@@ -63,15 +79,23 @@ exports.handler = async (event) => {
         body: params.toString()
       });
       const verify = await resp.json();
-      if (!verify.success) {
-        return { statusCode: 400, body: "Falló reCAPTCHA" };
-      }
+      if (!verify.success) return { statusCode: 400, body: "Falló reCAPTCHA" };
     } catch {
       return { statusCode: 400, body: "Error al verificar reCAPTCHA" };
     }
   }
 
-  // SMTP
+  // 5) Sanitizar: quitar campos internos antes de correo/CSV
+  delete data.recaptchaToken;
+  delete data["g-recaptcha-response"];
+  delete data.privacyAccepted;
+
+  const cleaned = {};
+  for (const k of ALLOWED_FIELDS) {
+    if (data[k] !== undefined) cleaned[k] = data[k];
+  }
+
+  // 6) SMTP
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 465),
@@ -92,22 +116,25 @@ exports.handler = async (event) => {
   const subjectPrefix = process.env.SUBJECT_PREFIX || CONFIG.site?.subjectPrefix || "Preafiliación";
   const subject = `${subjectPrefix} - ${data.apellidoPaterno} ${data.apellidoMaterno}, ${data.nombres}`;
 
-  const cuerpo = `Nueva solicitud de preafiliación:
+  const submittedAt = new Date().toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
+  const cuerpo = `Nueva solicitud de preafiliación
+Fecha/hora: ${submittedAt}
 
-${JSON.stringify(data, null, 2)}
+${JSON.stringify(cleaned, null, 2)}
 
---
+-- 
 Este mensaje fue enviado desde sityps.org.mx`;
 
-  const headers = Array.isArray(CONFIG.csv?.order) && CONFIG.csv.order.length
-    ? CONFIG.csv.order
-    : Object.keys(data);
+  // 7) CSV con orden configurable
+  const headersOrder = Array.isArray(CONFIG.csv?.order) && CONFIG.csv.order.length
+    ? CONFIG.csv.order.filter(k => ALLOWED_FIELDS.includes(k))
+    : ALLOWED_FIELDS;
 
-  const csvLine = headers
-    .map((k) => `"${String(data[k] ?? "").replace(/"/g, '""')}"`)
-    .join(",");
+  const headers = headersOrder.filter(k => Object.prototype.hasOwnProperty.call(cleaned, k));
+  const csvLine = headers.map((k) => `"${String(cleaned[k] ?? "").replace(/"/g, '""')}"`).join(",");
   const csv = `${headers.join(",")}\n${csvLine}\n`;
 
+  // 8) Envío
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
@@ -124,4 +151,4 @@ Este mensaje fue enviado desde sityps.org.mx`;
     });
     return { statusCode: 500, body: "No se pudo enviar el correo" };
   }
-};
+}
