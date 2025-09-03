@@ -56,13 +56,15 @@ export default function App() {
   else if (route === "/asistencia") Page = Asistencia;
 
   return (
-  <div className="min-h-screen bg-slate-50 pt-16 md:pt-20">
-    {/* pt-16≈h-14 móvil; md:pt-20≈h-16 desktop */}
-    <Header />
-    <Fade route={route}>
-      <Page />
-    </Fade>
-    <footer>...</footer>
-  </div>
-);
-
+    <div className="min-h-screen bg-slate-50 pt-16 md:pt-20">
+      {/* pt-16 ≈ h-14 (móvil); md:pt-20 ≈ h-16 (desktop) */}
+      <Header />
+      <Fade route={route}>
+        <Page />
+      </Fade>
+      <footer className="py-10 text-center text-xs text-slate-500">
+        © {new Date().getFullYear()} {cfg.site?.name || "SITYPS"} — Todos los derechos reservados.
+      </footer>
+    </div>
+  );
+}
