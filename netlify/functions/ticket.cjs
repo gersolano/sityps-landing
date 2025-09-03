@@ -1,9 +1,7 @@
-// netlify/functions/ticket.cjs
 const fs = require("fs");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
-/* ---------- helpers JSON ---------- */
 function j(code, ok, message, extra = {}) {
   return {
     statusCode: code,
@@ -12,32 +10,16 @@ function j(code, ok, message, extra = {}) {
   };
 }
 
-/* ---------- carga config opcional ---------- */
 let CONFIG = {};
 try {
   const cfgPath = path.join(__dirname, "..", "..", "sityps.config.json");
   CONFIG = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
 } catch { CONFIG = {}; }
 
-/* ---------- catálogos base ---------- */
 const MOD_CODES = {
-  "dashboard": "DSH",
-  "afiliacion": "AFI",
-  "cuotas": "CUO",
-  "finanzas": "FIN",
-  "demandas": "DEM",
-  "formacion": "FOR",
-  "escalafon": "ESC",
-  "prestaciones": "PRE",
-  "prensa": "PRN",
-  "deporte-cultura": "DPC",
-  "consultorios": "CON",
-  "miscelanea": "MIS",
-  "honor-justicia": "HON",
-  "electoral": "ELE",
-  "regiones": "REG",
-  "admin": "ADM",
-  "soporte": "SOP",
+  "dashboard": "DSH","afiliacion": "AFI","cuotas": "CUO","finanzas": "FIN","demandas": "DEM","formacion": "FOR",
+  "escalafon": "ESC","prestaciones": "PRE","prensa": "PRN","deporte-cultura": "DPC","consultorios": "CON",
+  "miscelanea": "MIS","honor-justicia": "HON","electoral": "ELE","regiones": "REG","admin": "ADM","soporte": "SOP",
 };
 
 const DEFAULT_TIPOS = [
@@ -53,11 +35,14 @@ const DEFAULT_TIPOS = [
   { id: "deporte-cultura", nombre: "Eventos deportivos/culturales", modulo: "deporte-cultura" },
   { id: "honor-justicia", nombre: "Honor y Justicia", modulo: "honor-justicia" },
   { id: "electoral", nombre: "Electoral", modulo: "electoral" },
-  { id: "facilidades", nombre: "Facilidades Administrativas", modulo: "afiliacion" }, // NUEVO
-  // { id: "regional", nombre: "Solicitud regional/facilidades", modulo: "regiones" }, // opcional
+  { id: "facilidades", nombre: "Facilidades Administrativas", modulo: "afiliacion" },
 ];
 
-/* ---------- util folio ---------- */
+const ALLOWED_INST = [
+  "Servicios de Salud de Oaxaca",
+  "Servicios de Salud IMSS-Bienestar",
+];
+
 function generarFolio(moduloSlug) {
   const code = MOD_CODES[moduloSlug] || "AFI";
   const y = new Date().getFullYear();
@@ -65,7 +50,6 @@ function generarFolio(moduloSlug) {
   return `${code}-${y}-${n}`;
 }
 
-/* ---------- validadores ---------- */
 const CURP_RE = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
 const RFC_RE  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -73,33 +57,18 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return j(405, false, "Method Not Allowed");
 
-  // 1) Parseo
   let data = {};
   try { data = JSON.parse(event.body || "{}"); }
   catch { return j(400, false, "Cuerpo inválido"); }
 
-  // 2) Campos
   const {
-    nombre = "",
-    correo = "",
-    telefono = "",
-    curp = "",
-    rfc = "",
-    unidadAdscripcion, // nuevo
-    seccion,           // retro-compatibilidad
-    tipo = "",
-    prioridad = "Media",
-    descripcion = "",
-    modulo,
-    files = [],
-    privacyAccepted = false,
-    recaptchaToken,
-
+    nombre = "", correo = "", telefono = "", curp = "", rfc = "",
+    unidadAdscripcion, seccion,
+    tipo = "", prioridad = "Media", descripcion = "",
+    modulo, files = [], privacyAccepted = false, recaptchaToken,
     // Facilidades
-    cantidadSolicitantes = "",
-    fechasSolicitadas = "",
-    tipoEvento = "",
-    institucion = "",
+    cantidadSolicitantes = "", fechasSolicitadas = "", tipoEvento = "", institucion = "",
+    acuseRhConfirm = false,
   } = data || {};
 
   if (!privacyAccepted) return j(400, false, "Debes aceptar el aviso de privacidad");
@@ -112,15 +81,19 @@ exports.handler = async (event) => {
   if (curp && !CURP_RE.test(curp)) return j(400, false, "CURP inválida");
   if (rfc && !RFC_RE.test(rfc)) return j(400, false, "RFC inválido");
 
-  // Requisitos específicos de Facilidades
   if (tipo === "facilidades") {
     const req = { cantidadSolicitantes, fechasSolicitadas, tipoEvento, institucion };
     for (const [k, v] of Object.entries(req)) {
       if (!String(v || "").trim()) return j(400, false, `Falta ${etiquetaCampo(k)} (Facilidades)`);
     }
+    if (!ALLOWED_INST.includes(institucion)) {
+      return j(400, false, "Institución inválida");
+    }
+    if (!acuseRhConfirm) {
+      return j(400, false, "Debes confirmar que adjuntaste el acuse entregado a RH.");
+    }
   }
 
-  // 3) reCAPTCHA
   if (process.env.RECAPTCHA_SECRET) {
     if (!recaptchaToken) return j(400, false, "Completa el reCAPTCHA");
     try {
@@ -137,35 +110,30 @@ exports.handler = async (event) => {
     }
   }
 
-  // 4) Mapeo tipo → módulo
   const tipos = Array.isArray(CONFIG.tickets?.tipos) && CONFIG.tickets.tipos.length ? CONFIG.tickets.tipos : DEFAULT_TIPOS;
   const tipoObj = tipos.find(t => t.id === tipo) || null;
   const moduloDestino = modulo || (tipoObj ? tipoObj.modulo : "afiliacion");
   const folio = generarFolio(moduloDestino);
   const submittedAt = new Date().toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
 
-  // 5) Adjuntos
   let totalSize = 0;
   const safeAttachments = [];
   if (Array.isArray(files)) {
-    for (const f of files.slice(0, 4)) {
+    for (const f of files.slice(0, 3)) {
       if (!f || !f.filename || !f.base64) continue;
       const ct = String(f.contentType || "").toLowerCase();
       const okType = ct.includes("pdf") || ct.includes("jpeg") || ct.includes("jpg") || ct.includes("png");
       if (!okType) continue;
       const buf = Buffer.from(f.base64, "base64");
       totalSize += buf.length;
-      if (buf.length > 2 * 1024 * 1024) continue; // >2MB
-      const isAcuse = String(f.purpose || "") === "acuseRh";
-      const filename = isAcuse ? `acuse-${sanitizeName(f.filename)}` : sanitizeName(f.filename);
-      safeAttachments.push({ filename, content: buf, contentType: ct });
+      if (buf.length > 2 * 1024 * 1024) continue;
+      safeAttachments.push({ filename: sanitizeName(f.filename), content: buf, contentType: ct });
     }
   }
   if (totalSize > 5 * 1024 * 1024) {
     return j(400, false, "El total de adjuntos supera 5 MB");
   }
 
-  // 6) SMTP
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 465),
@@ -179,7 +147,6 @@ exports.handler = async (event) => {
     return j(500, false, "SMTP no disponible (verify failed)");
   }
 
-  // 7) Destinatario
   const envKey = `TICKETS_TO_${(MOD_CODES[moduloDestino] || "AFI")}`;
   const toFromEnvSpecific = process.env[envKey];
   const toFromConfig = CONFIG.emails?.tickets?.[moduloDestino];
@@ -189,7 +156,6 @@ exports.handler = async (event) => {
   const subject = `[Ticket] ${folio} - ${tipoObj ? tipoObj.nombre : tipo} - ${nombre}`;
   const unidad = unidadAdscripcion || seccion || "-";
 
-  // 8) CSV
   const headers = [
     "folio","moduloDestino","tipo","prioridad","nombre","correo","telefono","curp","rfc","unidadAdscripcion",
     "descripcion","fechaHora","cantidadSolicitantes","fechasSolicitadas","tipoEvento","institucion"
@@ -206,8 +172,7 @@ exports.handler = async (event) => {
   ];
   const csv = `${headers.join(",")}\n${row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")}\n`;
 
-  // 9) Cuerpo de texto
-  const cuerpoBase = `Nuevo ticket de asistencia
+  const cuerpo = `Nuevo ticket de asistencia
 Folio: ${folio}
 Módulo destino: ${moduloDestino.toUpperCase()}
 Tipo: ${tipoObj ? tipoObj.nombre : tipo}
@@ -224,22 +189,17 @@ Solicitante:
 
 Descripción:
 ${descripcion}
-`;
-
-  const cuerpoFac = (tipo === "facilidades") ? `
+${tipo === "facilidades" ? `
 --- Facilidades Administrativas ---
 - Cantidad de solicitantes: ${cantidadSolicitantes}
 - Fechas solicitadas:       ${fechasSolicitadas}
 - Tipo de evento/incidencia:${tipoEvento}
 - Institución:              ${institucion}
-(Se anexa acuse a RH si fue proporcionado)
-` : "";
+` : ""}
 
-  const cuerpo = `${cuerpoBase}${cuerpoFac}
---
+-- 
 Mensaje enviado desde sityps.org.mx (Mesa de Asistencia)`;
 
-  // 10) Enviar
   try {
     await transporter.sendMail({
       from: `SITYPS <${process.env.SMTP_USER}>`,
@@ -267,7 +227,6 @@ function etiquetaCampo(k) {
   };
   return map[k] || k;
 }
-
 function sanitizeName(name) {
   return String(name || "")
     .replace(/[/\\?%*:|"<>]/g, "-")

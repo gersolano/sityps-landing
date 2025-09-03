@@ -14,7 +14,7 @@ const DEFAULT_TIPOS = [
   { id: "deporte-cultura", nombre: "Eventos deportivos/culturales" },
   { id: "honor-justicia", nombre: "Honor y Justicia" },
   { id: "electoral", nombre: "Electoral" },
-  { id: "facilidades", nombre: "Facilidades Administrativas" }, // NUEVO
+  { id: "facilidades", nombre: "Facilidades Administrativas" }, // actualizado
 ];
 
 const EVENTO_OPCIONES = [
@@ -24,6 +24,11 @@ const EVENTO_OPCIONES = [
   "Audiencia/Autoridad",
   "Incidencia médica",
   "Otro",
+];
+
+const INSTITUCIONES = [
+  "Servicios de Salud de Oaxaca",
+  "Servicios de Salud IMSS-Bienestar",
 ];
 
 export default function TicketForm() {
@@ -38,9 +43,9 @@ export default function TicketForm() {
   const [captchaOk, setCaptchaOk] = useState(false);
   const [folio, setFolio] = useState("");
 
-  const [files, setFiles] = useState([]);       // Adjuntos generales
-  const [acuseFile, setAcuseFile] = useState(null); // Acuse RH (1 archivo)
+  const [files, setFiles] = useState([]);      // Adjuntos generales
   const [tipoSel, setTipoSel] = useState("");
+  const [acuseRhConfirm, setAcuseRhConfirm] = useState(false);
 
   const hideTimer = useRef(null);
   const formRef = useRef(null);
@@ -104,14 +109,6 @@ export default function TicketForm() {
     }
     setFiles(allowed);
   }
-  function onAcuseChange(e) {
-    const f = e.target.files?.[0];
-    if (!f) { setAcuseFile(null); return; }
-    const okType = /pdf|image\/jpeg|image\/png/i.test(f.type);
-    if (!okType) { showErr("El acuse debe ser PDF/JPG/PNG."); e.target.value=""; return; }
-    if (f.size > 2 * 1024 * 1024) { showErr("El acuse no debe exceder 2 MB."); e.target.value=""; return; }
-    setAcuseFile(f);
-  }
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -122,11 +119,8 @@ export default function TicketForm() {
     const payload = Object.fromEntries(form.entries());
     payload.privacyAccepted = form.get("privacyAccepted") === "on";
 
-    // Tipo seleccionado (para validaciones específicas)
-    const tipo = payload.tipo;
-
-    // Validaciones de Facilidades
-    if (tipo === "facilidades") {
+    // Validaciones específicas de Facilidades
+    if (payload.tipo === "facilidades") {
       const req = ["cantidadSolicitantes","fechasSolicitadas","tipoEvento","institucion"];
       for (const k of req) {
         if (!String(payload[k] || "").trim()) {
@@ -134,6 +128,11 @@ export default function TicketForm() {
           showErr(`Falta ${etiquetaCampo(k)} (Facilidades)`);
           return;
         }
+      }
+      if (!acuseRhConfirm) {
+        setSubmitting(false);
+        showErr("Debes confirmar que adjuntaste el acuse entregado a RH.");
+        return;
       }
     }
 
@@ -144,19 +143,15 @@ export default function TicketForm() {
       payload.recaptchaToken = token;
     }
 
-    // Adjuntos → base64
-    const outFiles = [];
+    // Adjuntos generales → base64
     if (files.length) {
+      const arr = [];
       for (const f of files) {
         const base64 = await fileToBase64(f);
-        outFiles.push({ filename: f.name, contentType: f.type, base64 });
+        arr.push({ filename: f.name, contentType: f.type, base64 });
       }
+      payload.files = arr;
     }
-    if (acuseFile) {
-      const base64 = await fileToBase64(acuseFile);
-      outFiles.push({ filename: acuseFile.name, contentType: acuseFile.type, base64, purpose: "acuseRh" });
-    }
-    if (outFiles.length) payload.files = outFiles;
 
     try {
       const res = await fetch("/.netlify/functions/ticket", {
@@ -174,7 +169,7 @@ export default function TicketForm() {
 
         // Limpieza
         try { formRef.current?.reset(); } catch {}
-        setFiles([]); setAcuseFile(null); setTipoSel("");
+        setFiles([]); setTipoSel(""); setAcuseRhConfirm(false);
         try {
           formRef.current?.querySelectorAll("input, textarea, select").forEach((el) => {
             if (el.type !== "checkbox" && el.type !== "radio") el.value = "";
@@ -243,7 +238,6 @@ export default function TicketForm() {
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
-          {/* Tipo de solicitud */}
           <div>
             <label className="text-xs text-slate-600">Tipo de solicitud</label>
             <select
@@ -258,7 +252,6 @@ export default function TicketForm() {
             </select>
           </div>
 
-          {/* Prioridad */}
           <div>
             <label className="text-xs text-slate-600">Prioridad</label>
             <select name="prioridad" defaultValue="Media" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
@@ -298,16 +291,29 @@ export default function TicketForm() {
 
             <div className="grid sm:grid-cols-2 gap-4 mt-2">
               <Field name="fechasSolicitadas" label="Fechas solicitadas (rango o lista)" required />
-              <Field name="institucion" label="Institución para la que labora" required />
+              <div>
+                <label className="text-xs text-slate-600">Institución</label>
+                <select name="institucion" required className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">Selecciona…</option>
+                  {INSTITUCIONES.map(op => <option key={op} value={op}>{op}</option>)}
+                </select>
+              </div>
             </div>
 
-            <div className="mt-2">
-              <label className="text-xs text-slate-600">Acuse entregado a RH (PDF/JPG/PNG, máx 2MB)</label>
-              <input type="file" accept=".pdf,image/jpeg,image/png" onChange={onAcuseChange}
-                     className="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-slate-300 file:bg-white file:px-3 file:py-2" />
-              {acuseFile && (
-                <p className="mt-1 text-xs text-slate-600">Adjuntado: {acuseFile.name} ({Math.round(acuseFile.size/1024)} KB)</p>
-              )}
+            {/* Confirmación de acuse RH */}
+            <div className="mt-2 flex items-start gap-3">
+              <input
+                id="acuseRhConfirm"
+                name="acuseRhConfirm"
+                type="checkbox"
+                checked={acuseRhConfirm}
+                onChange={(e)=>setAcuseRhConfirm(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-600"
+                required
+              />
+              <label htmlFor="acuseRhConfirm" className="text-sm text-slate-700">
+                Confirmo que adjunté en los <b>archivos</b> el acuse entregado a RH (PDF/JPG/PNG, máx 2MB).
+              </label>
             </div>
           </fieldset>
         )}
