@@ -1,5 +1,6 @@
 import React from "react";
 import cfg from "../sityps.config.json";
+import Header from "./components/Header";
 
 import Home from "./pages/Home";
 import Mision from "./pages/Mision";
