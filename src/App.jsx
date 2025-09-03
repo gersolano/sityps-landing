@@ -56,7 +56,8 @@ export default function App() {
   else if (route === "/asistencia") Page = Asistencia;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    {/* pt-16 = 64px (≈ h-14), md:pt-20 = 80px (≈ h-16) */}
+    <div className="min-h-screen bg-slate-50 pt-16 md:pt-20">
       <Header />
       <Fade route={route}>
         <Page />
