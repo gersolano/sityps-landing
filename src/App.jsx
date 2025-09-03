@@ -26,7 +26,7 @@ function useHashRoute() {
   return route.startsWith("/") ? route : `/${route}`;
 }
 
-/* Transición */
+/* Transición suave entre páginas */
 function Fade({ route, children }) {
   const [show, setShow] = React.useState(false);
   React.useEffect(() => {
@@ -37,58 +37,6 @@ function Fade({ route, children }) {
     <div className={`transition-opacity duration-300 ${show ? "opacity-100" : "opacity-0"}`}>
       {children}
     </div>
-  );
-}
-
-function Header() {
-  const links = [
-    ["Inicio", "#/"],
-    ["Misión", "#/mision"],
-    ["Principios", "#/principios"],
-    ["Logros", "#/logros"],
-    ["Servicios", "#/servicios"],
-    ["Derechos", "#/derechos"],
-    ["Directorio", "#/directorio"],
-    ["Contacto", "#/contacto"],
-    ["Asistencia", "#/asistencia"],
-    ["Aviso de privacidad", cfg.site?.privacyUrl || "#/aviso-privacidad"],
-  ];
-  return (
-    <header className="border-b bg-white sticky top-0 z-20">
-      <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
-        <a href="#/" className="flex items-center gap-3 shrink-0">
-          <img src="/logo.png" alt="SITYPS" className="h-10 w-auto" />
-          <span className="text-lg font-semibold tracking-tight text-slate-800">SINDICATO SITYPS</span>
-        </a>
-        <nav className="hidden md:flex items-center gap-5 text-sm">
-          {links.map(([t, h]) => (
-            <a key={h} href={h} className="text-slate-700 hover:text-slate-900">
-              {t}
-            </a>
-          ))}
-          <a
-            href="#/preafiliacion"
-            className="rounded-lg bg-primary-600 text-white px-4 py-2 hover:bg-primary-700"
-          >
-            Preafiliación
-          </a>
-        </nav>
-        <div className="md:hidden flex items-center gap-2">
-          <a
-            href="#/asistencia"
-            className="rounded-lg border border-primary-600 text-primary-700 px-3 py-2 text-sm"
-          >
-            Asistencia
-          </a>
-          <a
-            href="#/preafiliacion"
-            className="rounded-lg bg-primary-600 text-white px-3 py-2 text-sm"
-          >
-            Preafiliación
-          </a>
-        </div>
-      </div>
-    </header>
   );
 }
 
