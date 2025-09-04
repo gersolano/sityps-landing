@@ -1,45 +1,54 @@
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 
-/* ========= Catálogo de Secretarías / Módulos (valores estables) ========= */
+/* =========================
+   Catálogos
+========================= */
+
+// Secretarías / módulos destino (según lista enviada)
 const SECRETARIAS = [
-  { value: "organizacion", label: "Organización, Actas y Acuerdos" },
-  { value: "afiliacion", label: "Afiliación (por Organización)" },
-  { value: "laborales", label: "Asuntos Laborales" },
-  { value: "formacion", label: "Formación, Capacitación y Desarrollo" },
-  { value: "escalafon", label: "Escalafón y Promoción de Plazas" },
-  { value: "prestaciones", label: "Créditos, Vivienda y Prestaciones Económicas" },
-  { value: "relaciones", label: "Relaciones, Prensa y Propaganda" },
-  { value: "finanzas", label: "Finanzas" },
-  { value: "cultura", label: "Fomento Cultural y Deportivo" },
-  { value: "mujer", label: "Mujer y Equidad de Género" },
-  { value: "honor", label: "Comité de Honor y Justicia" },
-  { value: "electoral", label: "Comité Electoral" },
+  { value: "general",            label: "Secretaría General" },
+  { value: "organizacion",       label: "Secretaria de Organización, actas y acuerdos" },
+  { value: "laboral",            label: "Secretaria de Asuntos Laborales" },
+  { value: "formacion",          label: "Secretaría de Formación, Capacitación y Desarrollo Profesional" },
+  { value: "seguridad",          label: "Secretaría de Seguridad y Previsión Social" },
+  { value: "escalafon",          label: "Secretaría de Escalafón y Promoción de Plazas" },
+  { value: "creditos",           label: "Secretaría de Créditos, vivienda y prestaciones económicas" },
+  { value: "prensa",             label: "Secretaría de Relaciones Prensa y propaganda" },
+  { value: "finanzas",           label: "Secretaría de Finanzas" },
+  { value: "cultura",            label: "Secretaría de Fomento Cultural y Deportivo" },
+  { value: "mujer",              label: "Secretaría de la Mujer y Equidad de Género" },
+  { value: "comision-hj",        label: "Comisión de Honor y Justicia" },
+  { value: "comite-electoral",   label: "Comité Electoral" },
+  { value: "comision-juridica",  label: "Comisión Juridica" },
 ];
 
-/* ========= Tipos de solicitud ========= */
 const TIPOS = [
-  { value: "facilidades", label: "Facilidades administrativas" },
+  { value: "facilidades",       label: "Facilidades administrativas" },
   { value: "conflicto-laboral", label: "Conflicto laboral" },
-  { value: "consulta", label: "Consulta / asesoría" },
-  { value: "tramite", label: "Trámite administrativo" },
-  { value: "otro", label: "Otro" },
+  { value: "documento",         label: "Emisión de documento" },
+  { value: "consulta",          label: "Consulta / información" },
+  { value: "otro",              label: "Otro" },
 ];
 
-/* ========= Tipos de evento/incidencia para facilidades ========= */
-const EVENTOS_FAC = [
-  "Comisión sindical",
-  "Asamblea",
-  "Capacitación",
-  "Evento sindical",
-  "Trámite administrativo",
-  "Otro",
-];
-
-/* ========= Institución por defecto para facilidades ========= */
 const INSTITUCIONES = [
   "Servicios de Salud de Oaxaca",
   "Servicios de Salud IMSS-Bienestar",
 ];
+
+const EVENTOS_FACILIDADES = [
+  "Asamblea",
+  "Plenos",
+  "Cursos",
+  "Capacitación",
+  "Comisión sindical",
+  "Evento académico",
+  "Acto cívico",
+  "Otro",
+];
+
+/* =========================
+   Componente
+========================= */
 
 export default function Asistencia() {
   const [form, setForm] = useState({
@@ -52,180 +61,188 @@ export default function Asistencia() {
     moduloDestino: "",
     tipo: "",
     descripcion: "",
-
-    // Facilidades
+    acuseKey: "",
     facilidades: {
       institucion: INSTITUCIONES[0],
       cantidadSolicitantes: 1,
       tipoEvento: "",
       otroTipoEvento: "",
-      // lista de periodos: [{from:'YYYY-MM-DD', to:'YYYY-MM-DD' | ''}]
-      fechas: [],
-      // campos temporales del selector
-      from: "",
-      to: "",
+      fechas: [], // [{from:'YYYY-MM-DD', to?: 'YYYY-MM-DD'}]
     },
-
-    // Archivo (acuse) — opcional pero recomendable para facilidades
-    acuseKey: "", // clave devuelta por la función de subida
-    acuseName: "",
   });
 
+  const [tempFecha, setTempFecha] = useState({ from: "", to: "" });
+  const [confirmoAcuse, setConfirmoAcuse] = useState(false);
+
   const [sending, setSending] = useState(false);
-  const [okMsg, setOkMsg] = useState("");
-  const [errMsg, setErrMsg] = useState("");
-  const [dialogOk, setDialogOk] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-  function setField(name, value) {
-    setForm((f) => ({ ...f, [name]: value }));
-  }
-  function setFac(name, value) {
-    setForm((f) => ({ ...f, facilidades: { ...f.facilidades, [name]: value } }));
+  const [errMsg, setErrMsg] = useState("");
+  const [successFolio, setSuccessFolio] = useState(""); // para el modal
+
+  // Campos limpios
+  const nombre = useMemo(() => form.nombre.trim(), [form.nombre]);
+  const correo = useMemo(() => form.correo.trim(), [form.correo]);
+  const modulo = useMemo(() => form.moduloDestino.trim(), [form.moduloDestino]);
+  const tipo   = useMemo(() => form.tipo.trim(), [form.tipo]);
+  const desc   = useMemo(() => form.descripcion.trim(), [form.descripcion]);
+
+  const faltanBasicos = !nombre || !correo || !modulo || !tipo || !desc;
+
+  const faltanFacilidades =
+    tipo === "facilidades" && (
+      form.facilidades.fechas.length === 0 ||
+      !form.facilidades.tipoEvento ||
+      (form.facilidades.tipoEvento === "Otro" && !form.facilidades.otroTipoEvento.trim()) ||
+      (!form.acuseKey && !confirmoAcuse)
+    );
+
+  const disabledSubmit = sending || uploading || faltanBasicos || (tipo === "facilidades" && faltanFacilidades);
+
+  function update(path, value) {
+    setForm((f) => {
+      const copy = structuredClone(f);
+      const segs = path.split(".");
+      let cur = copy;
+      for (let i = 0; i < segs.length - 1; i++) cur = cur[segs[i]];
+      cur[segs.at(-1)] = value;
+      return copy;
+    });
   }
 
-  function addPeriodo() {
-    const { from, to } = form.facilidades;
-    if (!from) return;
-    const periodo = { from, to: to || "" };
-    setFac("fechas", [...form.facilidades.fechas, periodo]);
-    setFac("from", "");
-    setFac("to", "");
-  }
+  /* ---------- UX helpers ---------- */
+  const baseInput = "w-full rounded-lg focus:ring-1";
+  const okBorder  = "border border-slate-300 focus:border-red-500 focus:ring-red-500";
+  const badBorder = "border border-red-500 focus:border-red-600 focus:ring-red-500";
 
-  function removePeriodo(idx) {
-    const arr = [...form.facilidades.fechas];
-    arr.splice(idx, 1);
-    setFac("fechas", arr);
-  }
+  const missNombre = submitted && !nombre;
+  const missCorreo = submitted && !correo;
+  const missModulo = submitted && !modulo;
+  const missTipo   = submitted && !tipo;
+  const missDesc   = submitted && !desc;
+
+  const missFacTipoEvento = submitted && tipo === "facilidades" && !form.facilidades.tipoEvento;
+  const missFacOtroEvento = submitted && tipo === "facilidades" &&
+    form.facilidades.tipoEvento === "Otro" && !form.facilidades.otroTipoEvento.trim();
+  const missFacFechas     = submitted && tipo === "facilidades" && form.facilidades.fechas.length === 0;
+  const missFacAcuse      = submitted && tipo === "facilidades" && !form.acuseKey && !confirmoAcuse;
+
+  /* ---------- Acciones ---------- */
 
   async function onUploadAcuse(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      setErrMsg("El archivo supera 4MB. Comprime antes de subir.");
-      return;
-    }
     setErrMsg("");
-    setOkMsg("");
     setUploading(true);
     try {
-      const base64 = await readAsDataURL(file); // data:<mime>;base64,XXXXX
+      const base64 = await fileToBase64(file);
       const res = await fetch("/.netlify/functions/acuse-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          mime: file.type || "application/octet-stream",
-          base64,
-        }),
+        body: JSON.stringify({ filename: file.name, mime: file.type, base64 }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok || !data?.key) {
-        setErrMsg(data?.error || "No se pudo subir el archivo.");
-        return;
+      const js = await res.json();
+      if (res.ok && js.ok) {
+        update("acuseKey", js.key);
+      } else {
+        setErrMsg(js.error || "No se pudo subir el archivo.");
       }
-      setField("acuseKey", data.key);
-      setField("acuseName", file.name);
-      setOkMsg("Archivo cargado correctamente.");
-    } catch (err) {
-      setErrMsg("No se pudo subir el archivo.");
+    } catch {
+      setErrMsg("Error al subir el archivo.");
     } finally {
       setUploading(false);
     }
   }
 
-  async function onSubmit(e) {
-    e.preventDefault();
-    setErrMsg("");
-    setOkMsg("");
-
-    // Validaciones mínimas
-    if (!form.nombre || !form.correo || !form.moduloDestino || !form.tipo || !form.descripcion) {
-      setErrMsg("Completa nombre, correo, módulo, tipo y descripción.");
+  function addPeriodo() {
+    const from = (tempFecha.from || "").trim();
+    const to   = (tempFecha.to || "").trim();
+    if (!from) {
+      setSubmitted(true);
       return;
     }
-    if (form.tipo === "facilidades") {
-      if (form.facilidades.fechas.length === 0) {
-        setErrMsg("Agrega al menos una fecha o periodo para las facilidades.");
-        return;
-      }
-      if (!form.facilidades.tipoEvento) {
-        setErrMsg("Selecciona el tipo de evento/incidencia en facilidades.");
-        return;
-      }
-    }
+    update("facilidades.fechas", [...form.facilidades.fechas, { from, to: to || undefined }]);
+    setTempFecha({ from: "", to: "" });
+  }
+
+  function removePeriodo(idx) {
+    const arr = [...form.facilidades.fechas];
+    arr.splice(idx, 1);
+    update("facilidades.fechas", arr);
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    setSubmitted(true);
+    setErrMsg("");
+    setSuccessFolio("");
+
+    if (disabledSubmit) return;
 
     setSending(true);
     try {
-      // Convertimos la lista de periodos a una cadena legible
-      const fechasSolicitadas = form.facilidades.fechas
-        .map((p) => (p.to ? `${p.from} → ${p.to}` : p.from))
-        .join(", ");
+      const body = {
+        nombre,
+        correo,
+        telefono: form.telefono,
+        unidadAdscripcion: form.unidadAdscripcion,
+        curp: form.curp ? form.curp.toUpperCase() : "",
+        rfc: form.rfc ? form.rfc.toUpperCase() : "",
+        moduloDestino: modulo,
+        tipo,
+        descripcion: desc,
+        acuseKey: form.acuseKey || "",
+      };
 
-      const tipoEventoFinal =
-        form.facilidades.tipoEvento === "Otro" && form.facilidades.otroTipoEvento
-          ? form.facilidades.otroTipoEvento
-          : form.facilidades.tipoEvento;
+      if (tipo === "facilidades") {
+        body.facilidades = {
+          institucion: form.facilidades.institucion,
+          cantidadSolicitantes: Number(form.facilidades.cantidadSolicitantes || 1),
+          tipoEvento:
+            form.facilidades.tipoEvento === "Otro" && form.facilidades.otroTipoEvento
+              ? form.facilidades.otroTipoEvento
+              : form.facilidades.tipoEvento,
+          fechasSolicitadas: form.facilidades.fechas
+            .map((p) => (p.to ? `${p.from} → ${p.to}` : p.from))
+            .join(", "),
+        };
+      }
 
       const res = await fetch("/.netlify/functions/tickets-create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nombre: form.nombre,
-          correo: form.correo,
-          telefono: form.telefono,
-          unidadAdscripcion: form.unidadAdscripcion,
-          curp: form.curp ? form.curp.toUpperCase() : "",
-          rfc: form.rfc ? form.rfc.toUpperCase() : "",
-          moduloDestino: form.moduloDestino,  // 👈 clave correcta
-          tipo: form.tipo,                    // 👈 clave correcta
-          descripcion: form.descripcion,      // 👈 clave correcta
-          acuseKey: form.acuseKey || "",
-
-          facilidades:
-            form.tipo === "facilidades"
-              ? {
-                  institucion: form.facilidades.institucion,
-                  cantidadSolicitantes: Number(form.facilidades.cantidadSolicitantes || 1),
-                  tipoEvento: tipoEventoFinal,
-                  fechasSolicitadas,
-                }
-              : undefined,
-        }),
+        body: JSON.stringify(body),
       });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setErrMsg(data?.error || "No se pudo registrar el ticket.");
-        return;
+      const js = await res.json();
+      if (res.ok && js.ok) {
+        setSuccessFolio(js.ticket.folio);
+        // reset
+        setForm({
+          nombre: "",
+          correo: "",
+          telefono: "",
+          unidadAdscripcion: "",
+          curp: "",
+          rfc: "",
+          moduloDestino: "",
+          tipo: "",
+          descripcion: "",
+          acuseKey: "",
+          facilidades: {
+            institucion: INSTITUCIONES[0],
+            cantidadSolicitantes: 1,
+            tipoEvento: "",
+            otroTipoEvento: "",
+            fechas: [],
+          },
+        });
+        setConfirmoAcuse(false);
+        setTempFecha({ from: "", to: "" });
+        setSubmitted(false);
+      } else {
+        setErrMsg(js.error || "No se pudo registrar el ticket.");
       }
-      setOkMsg(`Ticket creado: ${data.ticket.folio}`);
-      setDialogOk(true);
-
-      // Restablecer formulario
-      setForm({
-        nombre: "",
-        correo: "",
-        telefono: "",
-        unidadAdscripcion: "",
-        curp: "",
-        rfc: "",
-        moduloDestino: "",
-        tipo: "",
-        descripcion: "",
-        facilidades: {
-          institucion: INSTITUCIONES[0],
-          cantidadSolicitantes: 1,
-          tipoEvento: "",
-          otroTipoEvento: "",
-          fechas: [],
-          from: "",
-          to: "",
-        },
-        acuseKey: "",
-        acuseName: "",
-      });
     } catch {
       setErrMsg("No se pudo registrar el ticket.");
     } finally {
@@ -233,204 +250,298 @@ export default function Asistencia() {
     }
   }
 
+  /* ---------- UI ---------- */
+
   return (
-    <div className="mx-auto max-w-5xl px-4">
-      {/* Encabezado visual */}
-      <div className="rounded-2xl bg-gradient-to-b from-primary-800 to-primary-700 text-white p-6 mt-4">
-        <h1 className="text-3xl font-bold">Mesa de Asistencia</h1>
-        <p className="mt-1 text-white/90">
-          Registra tu ticket y el equipo correspondiente te atenderá.
-        </p>
+    <div className="min-h-screen bg-slate-50">
+      {/* Hero */}
+      <div className="bg-gradient-to-b from-red-800 to-red-700 text-white">
+        <div className="max-w-6xl mx-auto px-4 py-8">
+          <h1 className="text-3xl font-extrabold tracking-tight">Mesa de Asistencia</h1>
+          <p className="mt-1 text-white/90">
+            ¿Tienes una solicitud o problema? Registra tu ticket y el equipo correspondiente te atenderá.
+          </p>
+        </div>
       </div>
 
-      {/* Avisos */}
-      {errMsg && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-          {errMsg}
-        </div>
-      )}
-      {okMsg && (
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">
-          {okMsg}
-        </div>
-      )}
-
-      {/* Formulario */}
-      <form className="mt-5 grid gap-6" onSubmit={onSubmit}>
-        {/* Datos personales */}
-        <section className="grid gap-4">
-          <h2 className="text-lg font-semibold">Datos de contacto</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Input label="Nombre completo" value={form.nombre} onChange={(v) => setField("nombre", v)} />
-            <Input label="Correo" type="email" value={form.correo} onChange={(v) => setField("correo", v)} />
-            <Input label="Teléfono" value={form.telefono} onChange={(v) => setField("telefono", v)} />
-            <Input label="Unidad de adscripción (opcional)" value={form.unidadAdscripcion} onChange={(v) => setField("unidadAdscripcion", v)} />
-            <Input label="CURP (opcional)" value={form.curp} onChange={(v) => setField("curp", v.toUpperCase())} />
-            <Input label="RFC (opcional)" value={form.rfc} onChange={(v) => setField("rfc", v.toUpperCase())} />
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {errMsg && (
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+            {errMsg}
           </div>
-        </section>
+        )}
 
-        {/* Clasificación */}
-        <section className="grid gap-4">
-          <h2 className="text-lg font-semibold">Clasificación</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Select
-              label="Secretaría / Módulo destino"
-              value={form.moduloDestino}
-              onChange={(v) => setField("moduloDestino", v)}
-              options={SECRETARIAS}
-              placeholder="Selecciona…"
-            />
-            <Select
-              label="Tipo de solicitud"
-              value={form.tipo}
-              onChange={(v) => setField("tipo", v)}
-              options={TIPOS}
-              placeholder="Selecciona…"
-            />
-          </div>
-        </section>
-
-        {/* Descripción */}
-        <section className="grid gap-2">
-          <h2 className="text-lg font-semibold">Descripción</h2>
-          <label className="text-sm text-slate-600">Describe tu solicitud</label>
-          <textarea
-            rows={5}
-            className="mt-1 w-full rounded-lg border px-3 py-2"
-            value={form.descripcion}
-            onChange={(e) => setField("descripcion", e.target.value)}
-          />
-        </section>
-
-        {/* Facilidades (condicional) */}
-        {form.tipo === "facilidades" && (
-          <section className="grid gap-4 rounded-xl border p-4 bg-primary-50/40">
-            <h2 className="text-lg font-semibold">Facilidades administrativas</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              <SelectSimple
-                label="Institución"
-                value={form.facilidades.institucion}
-                onChange={(v) => setFac("institucion", v)}
-                options={INSTITUCIONES}
-              />
-              <Input
-                label="Cantidad de solicitantes"
-                type="number"
-                min={1}
-                value={form.facilidades.cantidadSolicitantes}
-                onChange={(v) => setFac("cantidadSolicitantes", v)}
-              />
-
-              <SelectSimple
-                label="Tipo de evento/incidencia"
-                value={form.facilidades.tipoEvento}
-                onChange={(v) => setFac("tipoEvento", v)}
-                options={EVENTOS_FAC}
-                placeholder="Selecciona…"
-              />
-              {form.facilidades.tipoEvento === "Otro" && (
-                <Input
-                  label="Especifica el evento"
-                  value={form.facilidades.otroTipoEvento}
-                  onChange={(v) => setFac("otroTipoEvento", v)}
-                />
-              )}
-            </div>
-
-            {/* Selector visual de fechas */}
-            <div className="grid gap-2">
-              <label className="text-sm text-slate-600">Fechas / periodos solicitados</label>
-              <div className="grid md:grid-cols-[1fr,1fr,auto] gap-2">
+        <form onSubmit={onSubmit} className="space-y-8">
+          {/* Datos de contacto */}
+          <section>
+            <h2 className="text-xl font-semibold text-slate-800">Datos de contacto</h2>
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Nombre completo</label>
                 <input
-                  type="date"
-                  className="rounded-lg border px-3 py-2"
-                  value={form.facilidades.from}
-                  onChange={(e) => setFac("from", e.target.value)}
+                  className={`${baseInput} ${missNombre ? badBorder : okBorder}`}
+                  value={form.nombre}
+                  onChange={(e) => update("nombre", e.target.value)}
+                  aria-invalid={!!missNombre}
                 />
-                <input
-                  type="date"
-                  className="rounded-lg border px-3 py-2"
-                  value={form.facilidades.to}
-                  onChange={(e) => setFac("to", e.target.value)}
-                  min={form.facilidades.from || undefined}
-                  placeholder="Opcional"
-                />
-                <button type="button" onClick={addPeriodo} className="rounded-lg bg-primary-600 text-white px-3 py-2">
-                  Agregar
-                </button>
               </div>
-
-              {form.facilidades.fechas.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {form.facilidades.fechas.map((p, idx) => (
-                    <span
-                      key={`${p.from}-${p.to}-${idx}`}
-                      className="inline-flex items-center gap-2 rounded-full bg-white border px-3 py-1 shadow-sm"
-                    >
-                      <span className="text-sm">
-                        {p.to ? `${p.from} → ${p.to}` : p.from}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-red-600 hover:underline"
-                        onClick={() => removePeriodo(idx)}
-                        title="Eliminar"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Subida de acuse */}
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <label className="text-sm text-slate-600">Acuse entregado a RH (opcional)</label>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Correo</label>
                 <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={onUploadAcuse}
-                  disabled={uploading}
-                  className="block w-full rounded-lg border px-3 py-2 bg-white"
+                  type="email"
+                  className={`${baseInput} ${missCorreo ? badBorder : okBorder}`}
+                  value={form.correo}
+                  onChange={(e) => update("correo", e.target.value)}
+                  aria-invalid={!!missCorreo}
                 />
-                <p className="text-xs text-slate-500">
-                  PDF/JPG/PNG, máx. 4MB. Se adjuntará como evidencia para agilizar la gestión.
-                </p>
-                {form.acuseName && (
-                  <p className="text-sm text-emerald-700">
-                    Archivo: <strong>{form.acuseName}</strong> (cargado)
-                  </p>
-                )}
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Teléfono</label>
+                <input
+                  className={`${baseInput} ${okBorder}`}
+                  value={form.telefono}
+                  onChange={(e) => update("telefono", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Unidad de adscripción (opcional)</label>
+                <input
+                  className={`${baseInput} ${okBorder}`}
+                  value={form.unidadAdscripcion}
+                  onChange={(e) => update("unidadAdscripcion", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">CURP (opcional)</label>
+                <input
+                  className={`${baseInput} border border-slate-300 uppercase tracking-wider focus:border-red-500 focus:ring-red-500`}
+                  value={form.curp}
+                  onChange={(e) => update("curp", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">RFC (opcional)</label>
+                <input
+                  className={`${baseInput} border border-slate-300 uppercase tracking-wider focus:border-red-500 focus:ring-red-500`}
+                  value={form.rfc}
+                  onChange={(e) => update("rfc", e.target.value)}
+                />
               </div>
             </div>
           </section>
-        )}
 
-        <div className="flex gap-3">
-          <button
-            disabled={sending || uploading}
-            className="rounded-lg bg-primary-600 text-white px-5 py-2 hover:bg-primary-700 disabled:opacity-60"
-          >
-            {sending ? "Enviando…" : "Registrar ticket"}
-          </button>
-        </div>
-      </form>
+          {/* Clasificación */}
+          <section>
+            <h2 className="text-xl font-semibold text-slate-800">Clasificación</h2>
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Secretaría / Módulo destino</label>
+                <select
+                  className={`${baseInput} ${missModulo ? badBorder : okBorder}`}
+                  value={form.moduloDestino}
+                  onChange={(e) => update("moduloDestino", e.target.value)}
+                  aria-invalid={!!missModulo}
+                >
+                  <option value="">Seleccione…</option>
+                  {SECRETARIAS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Tipo de solicitud</label>
+                <select
+                  className={`${baseInput} ${missTipo ? badBorder : okBorder}`}
+                  value={form.tipo}
+                  onChange={(e) => update("tipo", e.target.value)}
+                  aria-invalid={!!missTipo}
+                >
+                  <option value="">Seleccione…</option>
+                  {TIPOS.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Facilidades */}
+            {form.tipo === "facilidades" && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+                <h3 className="font-semibold text-slate-800 mb-3">Facilidades administrativas</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="block text-sm text-slate-600 mb-1">Institución</label>
+                    <select
+                      className={`${baseInput} ${okBorder}`}
+                      value={form.facilidades.institucion}
+                      onChange={(e) => update("facilidades.institucion", e.target.value)}
+                    >
+                      {INSTITUCIONES.map((i) => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-600 mb-1">Cantidad de solicitantes</label>
+                    <input
+                      type="number"
+                      min={1}
+                      className={`${baseInput} ${okBorder}`}
+                      value={form.facilidades.cantidadSolicitantes}
+                      onChange={(e) => update("facilidades.cantidadSolicitantes", e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-slate-600 mb-1">Tipo de evento/incidencia</label>
+                    <select
+                      className={`${baseInput} ${missFacTipoEvento ? badBorder : okBorder}`}
+                      value={form.facilidades.tipoEvento}
+                      onChange={(e) => update("facilidades.tipoEvento", e.target.value)}
+                      aria-invalid={!!missFacTipoEvento}
+                    >
+                      <option value="">Seleccione…</option>
+                      {EVENTOS_FACILIDADES.map((e) => (
+                        <option key={e} value={e}>{e}</option>
+                      ))}
+                    </select>
+                    {form.facilidades.tipoEvento === "Otro" && (
+                      <input
+                        placeholder="Especifique…"
+                        className={`${baseInput} ${missFacOtroEvento ? badBorder : okBorder} mt-2`}
+                        value={form.facilidades.otroTipoEvento}
+                        onChange={(e) => update("facilidades.otroTipoEvento", e.target.value)}
+                        aria-invalid={!!missFacOtroEvento}
+                      />
+                    )}
+                  </div>
+
+                  {/* Fechas / periodos */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm text-slate-600 mb-1">Fechas o periodos</label>
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                      <div className="flex gap-2">
+                        <input
+                          type="date"
+                          className={`${baseInput} ${okBorder}`}
+                          value={tempFecha.from}
+                          onChange={(e) => setTempFecha((t) => ({ ...t, from: e.target.value }))}
+                        />
+                        <span className="self-center text-slate-500">→</span>
+                        <input
+                          type="date"
+                          className={`${baseInput} ${okBorder}`}
+                          value={tempFecha.to}
+                          onChange={(e) => setTempFecha((t) => ({ ...t, to: e.target.value }))}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addPeriodo}
+                        className="mt-2 md:mt-0 rounded-lg bg-slate-800 px-4 py-2 text-white hover:bg-slate-900"
+                      >
+                        Agregar periodo
+                      </button>
+                    </div>
+
+                    {missFacFechas && (
+                      <p className="mt-2 text-sm text-red-600">Agrega al menos una fecha o periodo.</p>
+                    )}
+
+                    {form.facilidades.fechas.length > 0 && (
+                      <ul className="mt-3 list-inside list-disc text-sm text-slate-700">
+                        {form.facilidades.fechas.map((p, idx) => (
+                          <li key={idx} className="flex items-center gap-3">
+                            <span>{p.to ? `${p.from} → ${p.to}` : p.from}</span>
+                            <button
+                              type="button"
+                              className="text-red-600 hover:underline"
+                              onClick={() => removePeriodo(idx)}
+                            >
+                              quitar
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Acuse */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm text-slate-600 mb-1">Acuse entregado a RH (PDF/imagen, máx. 4MB)</label>
+                    <div className="flex items-center gap-3">
+                      <input type="file" accept="application/pdf,image/*" onChange={onUploadAcuse} />
+                      {uploading && <span className="text-slate-500 text-sm">Subiendo…</span>}
+                      {form.acuseKey && (
+                        <span className="text-green-700 text-sm">Acuse subido ✓</span>
+                      )}
+                    </div>
+
+                    {!form.acuseKey && (
+                      <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={confirmoAcuse}
+                          onChange={(e) => setConfirmoAcuse(e.target.checked)}
+                        />
+                        Confirmo que ya entregué el acuse a RH.
+                      </label>
+                    )}
+                    {missFacAcuse && (
+                      <p className="text-sm text-red-600 mt-1">
+                        Debes adjuntar el acuse o confirmar que ya fue entregado a RH.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* Descripción */}
+          <section>
+            <h2 className="text-xl font-semibold text-slate-800">Descripción</h2>
+            <textarea
+              rows={5}
+              className={`${baseInput} ${missDesc ? badBorder : okBorder} mt-2`}
+              placeholder="Describe brevemente tu solicitud o problema…"
+              value={form.descripcion}
+              onChange={(e) => update("descripcion", e.target.value)}
+              aria-invalid={!!missDesc}
+            />
+          </section>
+
+          {/* Enviar */}
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={disabledSubmit}
+              className="rounded-lg bg-red-700 text-white px-6 py-2.5 hover:bg-red-800 disabled:opacity-60"
+            >
+              {sending ? "Enviando…" : "Registrar ticket"}
+            </button>
+            {disabledSubmit && submitted && (
+              <span className="text-sm text-slate-500">
+                Revisa los campos marcados en rojo.
+              </span>
+            )}
+          </div>
+        </form>
+      </div>
 
       {/* Modal de confirmación */}
-      {dialogOk && (
+      {successFolio && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-xl font-semibold">¡Solicitud enviada!</h3>
-            <p className="mt-2 text-slate-600">
-              Tu ticket fue registrado correctamente. Podrás dar seguimiento desde el Backoffice.
+          <div className="w-[92%] max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-xl font-bold text-slate-800">¡Ticket registrado!</h3>
+            <p className="mt-2 text-slate-700">
+              Tu ticket fue registrado correctamente. Folio:
+              <span className="ml-1 font-mono font-semibold text-slate-900">{successFolio}</span>
             </p>
-            <div className="mt-5 flex justify-end">
+            <div className="mt-6 flex justify-end">
               <button
-                className="rounded-lg bg-primary-600 text-white px-4 py-2"
-                onClick={() => setDialogOk(false)}
+                className="rounded-lg bg-red-700 px-5 py-2 text-white hover:bg-red-800"
+                onClick={() => setSuccessFolio("")}
               >
                 Aceptar
               </button>
@@ -442,66 +553,14 @@ export default function Asistencia() {
   );
 }
 
-/* ========= Pequeños componentes de forma ========= */
-function Input({ label, value, onChange, type = "text", min }) {
-  return (
-    <div>
-      <label className="text-sm text-slate-600">{label}</label>
-      <input
-        type={type}
-        min={min}
-        className="mt-1 w-full rounded-lg border px-3 py-2"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
-  );
-}
-function Select({ label, value, onChange, options, placeholder }) {
-  return (
-    <div>
-      <label className="text-sm text-slate-600">{label}</label>
-      <select
-        className="mt-1 w-full rounded-lg border px-3 py-2"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{placeholder || "Selecciona…"}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-function SelectSimple({ label, value, onChange, options, placeholder }) {
-  return (
-    <div>
-      <label className="text-sm text-slate-600">{label}</label>
-      <select
-        className="mt-1 w-full rounded-lg border px-3 py-2"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {placeholder && <option value="">{placeholder}</option>}
-        {options.map((txt) => (
-          <option key={txt} value={txt}>
-            {txt}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-/* ========= Utilidad ========= */
-function readAsDataURL(file) {
+/* =========================
+   Utils
+========================= */
+function fileToBase64(file) {
   return new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onerror = rej;
-    reader.onload = () => res(reader.result);
-    reader.readAsDataURL(file);
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
   });
 }
