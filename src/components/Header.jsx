@@ -8,7 +8,6 @@ export default function Header() {
 
   const token = getToken();
   const account = token ? (getCurrentUser() || null) : null;
-  const isBackoffice = route === "/backoffice" || route.startsWith("/backoffice");
 
   const links = [
     { text: "Inicio", href: "#/" },
@@ -21,6 +20,7 @@ export default function Header() {
     { text: "Contacto", href: "#/contacto" },
     { text: "Asistencia", href: "#/asistencia" },
     { text: "Aviso de privacidad", href: cfg.site?.privacyUrl || "#/aviso-privacidad" },
+    { text: "Backoffice", href: "#/backoffice" },
   ];
 
   const isHashLink = (href) => href.startsWith("#/");
@@ -49,7 +49,7 @@ export default function Header() {
           </span>
         </a>
 
-        {/* Right side: desktop nav + account + mobile actions */}
+        {/* Right side */}
         <div className="flex items-center gap-4">
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-5 text-sm">
@@ -80,8 +80,8 @@ export default function Header() {
             </a>
           </nav>
 
-          {/* Desktop account chip (solo en /backoffice y si hay sesión) */}
-          {isBackoffice && account && (
+          {/* Desktop account area (se muestra en TODAS las rutas si hay sesión) */}
+          {account ? (
             <div className="hidden md:flex items-center gap-3">
               <div className="text-right leading-tight">
                 <div className="text-sm font-medium text-slate-800">
@@ -103,6 +103,14 @@ export default function Header() {
                 Salir
               </button>
             </div>
+          ) : (
+            <a
+              href="#/admin"
+              className="hidden md:inline-flex rounded-lg border px-3 py-2 text-sm"
+              title="Iniciar sesión"
+            >
+              Entrar
+            </a>
           )}
 
           {/* Mobile actions */}
@@ -144,14 +152,13 @@ export default function Header() {
         />
       )}
 
-      {/* Mobile drawer (debajo del header) */}
+      {/* Mobile drawer (siempre muestra saludo si hay sesión) */}
       <div
         className={`md:hidden fixed top-14 inset-x-0 z-30 bg-white border-t transition-transform duration-200 ${
           open ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0 pointer-events-none"
         }`}
       >
-        {/* Greeting en móvil (si hay sesión) */}
-        {isBackoffice && account && (
+        {account ? (
           <div className="px-4 pt-4 pb-2 border-b">
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-700">
@@ -173,6 +180,17 @@ export default function Header() {
                 Salir
               </button>
             </div>
+          </div>
+        ) : (
+          <div className="px-4 pt-4 pb-2 border-b">
+            <a
+              href="#/admin"
+              onClick={() => setOpen(false)}
+              className="inline-flex rounded-lg border px-3 py-2 text-sm"
+              title="Iniciar sesión"
+            >
+              Entrar
+            </a>
           </div>
         )}
 
@@ -202,13 +220,6 @@ export default function Header() {
               </a>
             )
           )}
-          <a
-            href="#/preafiliacion"
-            onClick={() => setOpen(false)}
-            className="mt-2 inline-flex items-center justify-center rounded-lg bg-primary-600 text-white px-4 py-2 hover:bg-primary-700"
-          >
-            Preafiliación
-          </a>
         </nav>
       </div>
     </header>
