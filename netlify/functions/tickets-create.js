@@ -1,5 +1,23 @@
 import { getStore } from '@netlify/blobs';
 
+/**
+ * Crea un ticket y lo guarda en Netlify Blobs (store "sityps").
+ * Espera JSON:
+ * {
+ *   nombre, correo, telefono,
+ *   moduloDestino,            // p.ej. "escalafon", "organizacion", etc.
+ *   tipo,                     // p.ej. "facilidades", "conflicto-laboral", ...
+ *   unidadAdscripcion, descripcion,
+ *   curp, rfc,
+ *   acuseKey,                 // clave devuelta por /.netlify/functions/acuse-upload (opcional)
+ *   facilidades: {            // solo cuando tipo === "facilidades"
+ *     institucion,            // "Servicios de Salud de Oaxaca" | "Servicios de Salud IMSS-Bienestar"
+ *     cantidadSolicitantes,   // número
+ *     fechasSolicitadas,      // string legible, ej: "2025-09-10 → 2025-09-12, 2025-09-20"
+ *     tipoEvento              // string
+ *   }
+ * }
+ */
 export async function handler(event) {
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Method not allowed' });
@@ -13,15 +31,20 @@ export async function handler(event) {
   }
 
   const {
-    nombre, correo, telefono,
-    moduloDestino,   // ej: "escalafon"
-    tipo,            // ej: "facilidades"
+    nombre,
+    correo,
+    telefono,
+    moduloDestino,
+    tipo,
     unidadAdscripcion,
     descripcion,
-    curp, rfc,
-    facilidades,     // { cantidadSolicitantes, fechasSolicitadas, tipoEvento, institucion }
+    curp,
+    rfc,
+    acuseKey = '',
+    facilidades, // { institucion, cantidadSolicitantes, fechasSolicitadas, tipoEvento }
   } = body;
 
+  // Validaciones mínimas
   if (!nombre || !correo || !moduloDestino || !tipo || !descripcion) {
     return json(400, { error: 'Faltan campos obligatorios' });
   }
@@ -33,27 +56,35 @@ export async function handler(event) {
     folio,
     submittedAt: now,
     updatedAt: now,
+
     moduloDestino: String(moduloDestino).toLowerCase(),
     tipo: String(tipo).toLowerCase(),
+
     nombre,
     correo,
     telefono: telefono || '',
     unidadAdscripcion: unidadAdscripcion || '',
     descripcion,
+
     curp: (curp || '').toUpperCase(),
     rfc: (rfc || '').toUpperCase(),
+
+    acuseKey: acuseKey || '',
+
     estado: 'nuevo',
     prioridad: 'Media',
     asignadoA: '',
+
     historico: [{ at: now, by: 'sistema', action: 'creado' }],
   };
 
-  if (facilidades && typeof facilidades === 'object') {
+  // Facilidades administrativas (opcional)
+  if (ticket.tipo === 'facilidades' && facilidades && typeof facilidades === 'object') {
     ticket.facilidades = {
+      institucion: facilidades.institucion || '',
       cantidadSolicitantes: Number(facilidades.cantidadSolicitantes || 1),
       fechasSolicitadas: facilidades.fechasSolicitadas || '',
       tipoEvento: facilidades.tipoEvento || '',
-      institucion: facilidades.institucion || '',
     };
   }
 
@@ -69,9 +100,15 @@ export async function handler(event) {
   }
 }
 
+/* ---------------- utilidades --------------- */
 function json(status, data) {
-  return { statusCode: status, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(data) };
+  return {
+    statusCode: status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(data),
+  };
 }
+
 function genFolio() {
   const ts = Date.now().toString(36).toUpperCase();
   const rnd = Math.random().toString(36).slice(2, 7).toUpperCase();
