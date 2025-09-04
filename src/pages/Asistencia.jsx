@@ -86,6 +86,13 @@ export default function Asistencia() {
     [tipoSolicitud]
   );
 
+  const clearErr = (keys) =>
+    setErrores((p) => {
+      const next = { ...p };
+      (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete next[k]);
+      return next;
+    });
+
   const addRango = () => {
     const e = {};
     if (!desde) e.desde = true;
@@ -104,10 +111,7 @@ export default function Asistencia() {
     setRangos((arr) => [...arr, { desde, hasta }]);
     setDesde("");
     setHasta("");
-    setErrores((p) => {
-      const { rango, desde: _d, hasta: _h, ...rest } = p;
-      return rest;
-    });
+    clearErr(["rango", "desde", "hasta", "rangos"]);
   };
 
   const quitarRango = (idx) =>
@@ -171,7 +175,6 @@ export default function Asistencia() {
   const subirArchivo = async (file, path) => {
     const fd = new FormData();
     fd.append("file", file);
-    // path ejemplo: tickets/T-ABC/adjuntos/  (el server añade filename)
     const res = await fetch(
       `/.netlify/functions/acuse-upload?path=${encodeURIComponent(path)}&filename=${encodeURIComponent(file.name)}`,
       { method: "POST", body: fd }
@@ -191,7 +194,6 @@ export default function Asistencia() {
 
     setEnviando(true);
     try {
-      // Prepara payload: enviamos *también* modulo/tipo para el backend
       const payload = {
         nombre: nombre.trim(),
         correo: correo.trim(),
@@ -240,7 +242,7 @@ export default function Asistencia() {
         try {
           await subirArchivo(acuse, `tickets/${folio}/acuse/`);
         } catch {
-          // no romper el flujo si falla el archivo
+          /* ignorar error puntual de acuse */
         }
       }
 
@@ -250,7 +252,7 @@ export default function Asistencia() {
           try {
             await subirArchivo(f, `tickets/${folio}/adjuntos/`);
           } catch {
-            // ignorar error puntual
+            /* ignorar error puntual */
           }
         }
       }
@@ -278,7 +280,7 @@ export default function Asistencia() {
     if (errores.fechaUnica) return "Selecciona la fecha solicitada.";
     if (errores.rangos) return "Agrega al menos un periodo de fechas.";
     if (errores.acuse || errores.confirmAcuse)
-      return "Adjunta y confirma el acuse de RH.";
+      return "Confirma el acuse entregado a RH.";
     if (errores.descripcion) return "Describe brevemente tu solicitud.";
     return "";
   }, [errores]);
@@ -342,7 +344,10 @@ export default function Asistencia() {
                   err("nombre")
                 )}
                 value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
+                onChange={(e) => {
+                  setNombre(e.target.value);
+                  clearErr("nombre");
+                }}
               />
             </div>
             <div>
@@ -353,7 +358,10 @@ export default function Asistencia() {
                   err("correo")
                 )}
                 value={correo}
-                onChange={(e) => setCorreo(e.target.value)}
+                onChange={(e) => {
+                  setCorreo(e.target.value);
+                  clearErr("correo");
+                }}
                 inputMode="email"
               />
             </div>
@@ -365,7 +373,10 @@ export default function Asistencia() {
                   err("telefono")
                 )}
                 value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
+                onChange={(e) => {
+                  setTelefono(e.target.value);
+                  clearErr("telefono");
+                }}
                 inputMode="tel"
               />
             </div>
@@ -408,7 +419,10 @@ export default function Asistencia() {
                   err("secretaria")
                 )}
                 value={secretaria}
-                onChange={(e) => setSecretaria(e.target.value)}
+                onChange={(e) => {
+                  setSecretaria(e.target.value);
+                  clearErr("secretaria");
+                }}
               >
                 <option value="">Seleccione…</option>
                 {SECRETARIAS.map((s) => (
@@ -425,7 +439,10 @@ export default function Asistencia() {
                   err("tipoSolicitud")
                 )}
                 value={tipoSolicitud}
-                onChange={(e) => setTipoSolicitud(e.target.value)}
+                onChange={(e) => {
+                  setTipoSolicitud(e.target.value);
+                  clearErr("tipoSolicitud");
+                }}
               >
                 <option value="">Seleccione…</option>
                 {TIPOS_SOLICITUD.map((t) => (
@@ -490,7 +507,10 @@ export default function Asistencia() {
                       err("diasSolicitados")
                     )}
                     value={diasSolicitados}
-                    onChange={(e) => setDiasSolicitados(e.target.value)}
+                    onChange={(e) => {
+                      setDiasSolicitados(e.target.value);
+                      clearErr(["diasSolicitados", "fechaUnica", "rangos"]);
+                    }}
                   />
                 </div>
               </div>
@@ -507,7 +527,10 @@ export default function Asistencia() {
                         err("fechaUnica")
                       )}
                       value={fechaUnica}
-                      onChange={(e) => setFechaUnica(e.target.value)}
+                      onChange={(e) => {
+                        setFechaUnica(e.target.value);
+                        clearErr("fechaUnica");
+                      }}
                     />
                   </div>
                 </div>
@@ -524,7 +547,10 @@ export default function Asistencia() {
                           errores.desde ? "ring-2 ring-red-500" : "focus:ring-sky-500"
                         )}
                         value={desde}
-                        onChange={(e) => setDesde(e.target.value)}
+                        onChange={(e) => {
+                          setDesde(e.target.value);
+                          clearErr(["desde", "rango"]);
+                        }}
                       />
                     </div>
                     <div>
@@ -537,7 +563,10 @@ export default function Asistencia() {
                           errores.hasta ? "ring-2 ring-red-500" : "focus:ring-sky-500"
                         )}
                         value={hasta}
-                        onChange={(e) => setHasta(e.target.value)}
+                        onChange={(e) => {
+                          setHasta(e.target.value);
+                          clearErr(["hasta", "rango"]);
+                        }}
                       />
                     </div>
                     <button
@@ -586,7 +615,10 @@ export default function Asistencia() {
                   <input
                     type="file"
                     accept="application/pdf,image/*"
-                    onChange={(e) => setAcuse(e.target.files?.[0] || null)}
+                    onChange={(e) => {
+                      setAcuse(e.target.files?.[0] || null);
+                      clearErr("acuse");
+                    }}
                     className={cx(
                       "block w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-0 file:bg-slate-900 file:text-white hover:file:bg-slate-800",
                       err("acuse")
@@ -601,7 +633,10 @@ export default function Asistencia() {
                       err("confirmAcuse")
                     )}
                     checked={confirmAcuse}
-                    onChange={(e) => setConfirmAcuse(e.target.checked)}
+                    onChange={(e) => {
+                      setConfirmAcuse(e.target.checked);
+                      clearErr("confirmAcuse");
+                    }}
                   />
                   <span>Confirmo que ya entregué el acuse a RH.</span>
                 </label>
@@ -621,7 +656,10 @@ export default function Asistencia() {
               err("descripcion")
             )}
             value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
+            onChange={(e) => {
+              setDescripcion(e.target.value);
+              clearErr("descripcion");
+            }}
           />
         </section>
 
