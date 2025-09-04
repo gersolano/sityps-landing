@@ -35,8 +35,7 @@ export default function Header() {
     <header
       className="
         fixed top-0 inset-x-0 z-40 border-b
-        bg-white
-        md:bg-white/90 md:backdrop-blur-md supports-[backdrop-filter]:md:bg-white/70
+        bg-white md:bg-white/90 md:backdrop-blur-md supports-[backdrop-filter]:md:bg-white/70
         shadow-sm
       "
     >
@@ -80,15 +79,18 @@ export default function Header() {
             </a>
           </nav>
 
-          {/* Desktop account area (se muestra en TODAS las rutas si hay sesión) */}
+          {/* Desktop account (todas las rutas si hay sesión) */}
           {account ? (
             <div className="hidden md:flex items-center gap-3">
               <div className="text-right leading-tight">
                 <div className="text-sm font-medium text-slate-800">
                   {account.displayName || account.user || "Usuario"}
                 </div>
-                <div className="text-xs text-slate-500">
-                  {account.puesto || account.role || ""}
+                <div className="flex items-center gap-2 justify-end">
+                  <div className="text-xs text-slate-500">
+                    {account.puesto || account.role || ""}
+                  </div>
+                  <RoleBadge role={account.role} />
                 </div>
               </div>
               <div className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-700">
@@ -142,7 +144,7 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Overlay (debajo del header, encima del contenido) */}
+      {/* Overlay (debajo del header) */}
       {open && (
         <button
           type="button"
@@ -152,7 +154,7 @@ export default function Header() {
         />
       )}
 
-      {/* Mobile drawer (siempre muestra saludo si hay sesión) */}
+      {/* Mobile drawer (con saludo/badge si hay sesión) */}
       <div
         className={`md:hidden fixed top-14 inset-x-0 z-30 bg-white border-t transition-transform duration-200 ${
           open ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0 pointer-events-none"
@@ -168,8 +170,9 @@ export default function Header() {
                 <div className="text-sm font-medium text-slate-800">
                   {account.displayName || account.user || "Usuario"}
                 </div>
-                <div className="text-xs text-slate-500">
-                  {account.puesto || account.role || ""}
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-slate-500">{account.puesto || account.role || ""}</div>
+                  <RoleBadge role={account.role} />
                 </div>
               </div>
               <button
@@ -224,6 +227,42 @@ export default function Header() {
       </div>
     </header>
   );
+}
+
+/* Badge por rol */
+function RoleBadge({ role }) {
+  const meta = roleMeta(role);
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.classes}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function roleMeta(role) {
+  const r = String(role || "").toLowerCase().trim();
+  const map = {
+    admin: { label: "Admin", classes: "bg-slate-100 text-slate-800 border-slate-200" },
+    afiliacion: { label: "Afiliación", classes: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+    demandas: { label: "Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
+    laborales: { label: "Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
+    finanzas: { label: "Finanzas", classes: "bg-amber-100 text-amber-800 border-amber-200" },
+    formacion: { label: "Formación", classes: "bg-sky-100 text-sky-800 border-sky-200" },
+    escalafon: { label: "Escalafón", classes: "bg-indigo-100 text-indigo-800 border-indigo-200" },
+    prestaciones: { label: "Prestaciones", classes: "bg-teal-100 text-teal-800 border-teal-200" },
+    prensa: { label: "Prensa", classes: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" },
+    cultura: { label: "Cultura/Deporte", classes: "bg-purple-100 text-purple-800 border-purple-200" },
+    "deporte-cultura": { label: "Deporte/Cultura", classes: "bg-violet-100 text-violet-800 border-violet-200" },
+    equidad: { label: "Mujer y Equidad", classes: "bg-pink-100 text-pink-800 border-pink-200" },
+    "honor-justicia": { label: "Honor y Justicia", classes: "bg-gray-100 text-gray-800 border-gray-200" },
+    electoral: { label: "Electoral", classes: "bg-orange-100 text-orange-800 border-orange-200" },
+    consultorios: { label: "Consultorios", classes: "bg-lime-100 text-lime-800 border-lime-200" },
+    soporte: { label: "Soporte", classes: "bg-zinc-100 text-zinc-800 border-zinc-200" },
+    "region-tuxtepec": { label: "Región Tuxtepec", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+    "region-pochutla": { label: "Región Pochutla", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+    "region-valle-centrales": { label: "Región Valles Centrales", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+  };
+  return map[r] || { label: r || "Rol", classes: "bg-slate-100 text-slate-800 border-slate-200" };
 }
 
 /* Hook para saber la ruta actual (#/ruta) y resaltar activo */
