@@ -41,12 +41,8 @@ const TIPOS_EVENTO = [
   "Otro",
 ];
 
-const emailOk = (s) =>
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || "").trim());
-
-const phoneOk = (s) =>
-  /^[0-9\s+\-()]{7,20}$/.test((s || "").trim());
-
+const emailOk = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || "").trim());
+const phoneOk = (s) => /^[0-9\s+\-()]{7,20}$/.test((s || "").trim());
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function Asistencia() {
@@ -195,7 +191,7 @@ export default function Asistencia() {
 
     setEnviando(true);
     try {
-      // Prepara payload
+      // Prepara payload: enviamos *también* modulo/tipo para el backend
       const payload = {
         nombre: nombre.trim(),
         correo: correo.trim(),
@@ -205,6 +201,9 @@ export default function Asistencia() {
         rfc: rfc.trim(),
         secretaria,
         tipoSolicitud,
+        // Compatibilidad backend
+        modulo: secretaria,
+        tipo: tipoSolicitud,
         descripcion: descripcion.trim(),
         adjuntosMeta: (adjuntos || []).map((f) => ({
           name: f.name,
@@ -269,25 +268,42 @@ export default function Asistencia() {
   // Clases helper
   const cx = (...a) => a.filter(Boolean).join(" ");
   const err = (k) =>
-    errores[k]
-      ? "ring-2 ring-red-500 focus:ring-red-500"
-      : "focus:ring-sky-500";
+    errores[k] ? "ring-2 ring-red-500 focus:ring-red-500" : "focus:ring-sky-500";
+
+  // Resumen de error arriba
+  const errorSummary = useMemo(() => {
+    if (errores.diasSolicitados) return "Indica número de días solicitados.";
+    if (errores.secretaria) return "Selecciona la Secretaría / Módulo destino.";
+    if (errores.tipoSolicitud) return "Selecciona el tipo de solicitud.";
+    if (errores.fechaUnica) return "Selecciona la fecha solicitada.";
+    if (errores.rangos) return "Agrega al menos un periodo de fechas.";
+    if (errores.acuse || errores.confirmAcuse)
+      return "Adjunta y confirma el acuse de RH.";
+    if (errores.descripcion) return "Describe brevemente tu solicitud.";
+    return "";
+  }, [errores]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      {/* Banner errores/ok */}
+      {/* Banner resumen de errores */}
+      {errorSummary && (
+        <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-800 px-4 py-3">
+          {errorSummary}
+        </div>
+      )}
+
+      {/* Error de servidor */}
       {errores.submit && (
         <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-800 px-4 py-3">
           {errores.submit}
         </div>
       )}
 
+      {/* Modal OK */}
       {okFolio && (
         <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-xl font-semibold mb-2">
-              ¡Ticket registrado!
-            </h3>
+            <h3 className="text-xl font-semibold mb-2">¡Ticket registrado!</h3>
             <p className="text-slate-700">
               Tu folio es <span className="font-mono font-bold">{okFolio}</span>.
             </p>
@@ -479,7 +495,6 @@ export default function Asistencia() {
                 </div>
               </div>
 
-              {/* Fechas / Periodos */}
               {(Number(diasSolicitados) || 0) === 1 ? (
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
@@ -633,9 +648,7 @@ export default function Asistencia() {
             disabled={enviando}
             className={cx(
               "px-5 py-2 rounded-md text-white",
-              enviando
-                ? "bg-slate-400 cursor-not-allowed"
-                : "bg-red-600 hover:bg-red-700"
+              enviando ? "bg-slate-400 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"
             )}
           >
             {enviando ? "Guardando…" : "Registrar ticket"}
