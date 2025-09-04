@@ -1,45 +1,28 @@
+// netlify/functions/tickets-list.js
 import { getStore } from '@netlify/blobs';
 
 export async function handler(event) {
-  if (event.httpMethod !== 'GET') {
-    return json(405, { error: 'Method not allowed' });
-  }
-
-  const { search = '', modulo = '', tipo = '', estado = '' } =
-    event.queryStringParameters || {};
-
   try {
-    const store = getStore({ name: 'sityps' });
-    const list = await store.list({ prefix: 'tickets/' });
+    const storeName = process.env.BLOBS_STORE_NAME || 'sityps-tickets';
+    const opts = { name: storeName };
+    if (process.env.NETLIFY_SITE_ID && process.env.NETLIFY_API_TOKEN) {
+      opts.siteID = process.env.NETLIFY_SITE_ID;
+      opts.token  = process.env.NETLIFY_API_TOKEN;
+    }
+    const store = getStore(opts);
 
+    const { items: list } = await store.list({ prefix: 'tickets/' });
+    const keys = (list || []).map(x => x.key);
     const tickets = [];
-    await Promise.all(
-      list.blobs.map(async (b) => {
-        const raw = await store.get(b.key, { type: 'json' });
-        if (raw) tickets.push(raw);
-      })
-    );
+    for (const k of keys) {
+      const t = await store.getJSON(k);
+      if (t) tickets.push(t);
+    }
+    tickets.sort((a,b) => String(b.creadoEn).localeCompare(String(a.creadoEn)));
 
-    const q = norm(search);
-    const out = tickets
-      .filter((t) => (modulo ? String(t.moduloDestino).toLowerCase() === String(modulo).toLowerCase() : true))
-      .filter((t) => (tipo ? String(t.tipo).toLowerCase() === String(tipo).toLowerCase() : true))
-      .filter((t) => (estado ? String(t.estado).toLowerCase() === String(estado).toLowerCase() : true))
-      .filter((t) => {
-        if (!q) return true;
-        const hay = [t.folio, t.nombre, t.correo, t.telefono, t.descripcion, t.unidadAdscripcion].join(' ').toLowerCase();
-        return hay.includes(q);
-      })
-      .sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
-
-    return json(200, { tickets: out });
-  } catch (e) {
-    console.error(e);
-    return json(500, { error: 'No se pudo listar' });
+    return { statusCode: 200, body: JSON.stringify({ ok: true, items: tickets }) };
+  } catch (err) {
+    console.error('tickets-list error:', err);
+    return { statusCode: 500, body: JSON.stringify({ ok: false, error: String(err?.message || err) }) };
   }
-}
-
-function norm(s) { return String(s || '').trim().toLowerCase(); }
-function json(status, data) {
-  return { statusCode: status, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(data) };
 }
