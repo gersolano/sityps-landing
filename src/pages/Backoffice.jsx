@@ -11,7 +11,7 @@ import {
 const ESTADOS = ["nuevo", "en_proceso", "resuelto", "cerrado"];
 
 export default function Backoffice() {
-  const account = getCurrentUser(); // { user, role, displayName, puesto }
+  const account = getCurrentUser();
 
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -72,23 +72,25 @@ export default function Backoffice() {
 
   return (
     <div className="mx-auto max-w-6xl px-4">
-      <div className="flex items-center justify-between mt-4 mb-3">
-        <h1 className="text-2xl font-semibold text-slate-800">Backoffice — Tickets</h1>
+      {/* Encabezado: badge izquierda, título centrado, usuario/Salir a la derecha */}
+      <div className="mt-4 mb-3 grid grid-cols-1 md:grid-cols-3 items-center">
+        <div className="flex justify-center md:justify-start">
+          <RoleBadge role={account?.role} />
+        </div>
 
-        <div className="flex items-center gap-3">
-          {/* Info de cuenta con badge por rol */}
+        <h1 className="text-2xl font-semibold text-slate-800 text-center">
+          Backoffice — Tickets
+        </h1>
+
+        <div className="mt-3 md:mt-0 flex items-center justify-center md:justify-end gap-3">
           <div className="text-right leading-tight">
             <div className="text-sm font-medium text-slate-800">
               {account?.displayName || account?.user || "Usuario"}
             </div>
-            <div className="flex items-center gap-2 justify-end">
-              <div className="text-xs text-slate-500">
-                {account?.puesto || account?.role || ""}
-              </div>
-              <RoleBadge role={account?.role} />
+            <div className="text-xs text-slate-500">
+              {account?.puesto || account?.role || ""}
             </div>
           </div>
-
           <div className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-700">
             {(account?.displayName || account?.user || "U").slice(0, 1).toUpperCase()}
           </div>
@@ -350,7 +352,7 @@ export default function Backoffice() {
   );
 }
 
-/* Badge por rol (igual criterio que en Header) */
+/* Badge por rol (mismo criterio) */
 function RoleBadge({ role }) {
   const meta = roleMeta(role);
   return (
@@ -366,107 +368,25 @@ function RoleBadge({ role }) {
 function roleMeta(role) {
   const r = String(role || "").toLowerCase().trim();
   const map = {
-    admin: {
-      label: "Admin",
-      title: "Administrador",
-      classes: "bg-slate-100 text-slate-800 border-slate-200",
-    },
-    afiliacion: {
-      label: "Afiliación",
-      title: "Secretaría de Organización, Actas y Acuerdos",
-      classes: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    },
-    demandas: {
-      label: "Asuntos Laborales",
-      title: "Secretaría de Asuntos Laborales",
-      classes: "bg-rose-100 text-rose-800 border-rose-200",
-    },
-    laborales: {
-      label: "Asuntos Laborales",
-      title: "Secretaría de Asuntos Laborales",
-      classes: "bg-rose-100 text-rose-800 border-rose-200",
-    },
-    finanzas: {
-      label: "Finanzas",
-      title: "Secretaría de Finanzas",
-      classes: "bg-amber-100 text-amber-800 border-amber-200",
-    },
-    formacion: {
-      label: "Formación",
-      title: "Secretaría de Formación",
-      classes: "bg-sky-100 text-sky-800 border-sky-200",
-    },
-    escalafon: {
-      label: "Escalafón",
-      title: "Secretaría de Escalafón",
-      classes: "bg-indigo-100 text-indigo-800 border-indigo-200",
-    },
-    prestaciones: {
-      label: "Prestaciones",
-      title: "Créditos, Vivienda y Prestaciones",
-      classes: "bg-teal-100 text-teal-800 border-teal-200",
-    },
-    prensa: {
-      label: "Prensa",
-      title: "Relaciones, Prensa y Propaganda",
-      classes: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200",
-    },
-    cultura: {
-      label: "Cultura/Deporte",
-      title: "Fomento Cultural y Deportivo",
-      classes: "bg-purple-100 text-purple-800 border-purple-200",
-    },
-    "deporte-cultura": {
-      label: "Deporte/Cultura",
-      title: "Fomento Cultural y Deportivo",
-      classes: "bg-violet-100 text-violet-800 border-violet-200",
-    },
-    equidad: {
-      label: "Mujer y Equidad",
-      title: "La Mujer y Equidad de Género",
-      classes: "bg-pink-100 text-pink-800 border-pink-200",
-    },
-    "honor-justicia": {
-      label: "Honor y Justicia",
-      title: "Comité de Honor y Justicia",
-      classes: "bg-gray-100 text-gray-800 border-gray-200",
-    },
-    electoral: {
-      label: "Electoral",
-      title: "Comité Electoral",
-      classes: "bg-orange-100 text-orange-800 border-orange-200",
-    },
-    consultorios: {
-      label: "Consultorios",
-      title: "Consultorios/Convenios",
-      classes: "bg-lime-100 text-lime-800 border-lime-200",
-    },
-    soporte: {
-      label: "Soporte",
-      title: "Soporte Técnico",
-      classes: "bg-zinc-100 text-zinc-800 border-zinc-200",
-    },
-    "region-tuxtepec": {
-      label: "Región Tuxtepec",
-      title: "Representante Regional Tuxtepec",
-      classes: "bg-cyan-100 text-cyan-800 border-cyan-200",
-    },
-    "region-pochutla": {
-      label: "Región Pochutla",
-      title: "Representante Regional Pochutla",
-      classes: "bg-cyan-100 text-cyan-800 border-cyan-200",
-    },
-    "region-valle-centrales": {
-      label: "Valles Centrales",
-      title: "Representante Regional Valles Centrales",
-      classes: "bg-cyan-100 text-cyan-800 border-cyan-200",
-    },
+    admin: { label: "Admin", title: "Administrador", classes: "bg-slate-100 text-slate-800 border-slate-200" },
+    afiliacion: { label: "Afiliación", title: "Secretaría de Organización, Actas y Acuerdos", classes: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+    demandas: { label: "Asuntos Laborales", title: "Secretaría de Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
+    laborales: { label: "Asuntos Laborales", title: "Secretaría de Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
+    finanzas: { label: "Finanzas", title: "Secretaría de Finanzas", classes: "bg-amber-100 text-amber-800 border-amber-200" },
+    formacion: { label: "Formación", title: "Secretaría de Formación", classes: "bg-sky-100 text-sky-800 border-sky-200" },
+    escalafon: { label: "Escalafón", title: "Secretaría de Escalafón", classes: "bg-indigo-100 text-indigo-800 border-indigo-200" },
+    prestaciones: { label: "Prestaciones", title: "Créditos, Vivienda y Prestaciones", classes: "bg-teal-100 text-teal-800 border-teal-200" },
+    prensa: { label: "Prensa", title: "Relaciones, Prensa y Propaganda", classes: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" },
+    cultura: { label: "Cultura/Deporte", title: "Fomento Cultural y Deportivo", classes: "bg-purple-100 text-purple-800 border-purple-200" },
+    "deporte-cultura": { label: "Deporte/Cultura", title: "Fomento Cultural y Deportivo", classes: "bg-violet-100 text-violet-800 border-violet-200" },
+    equidad: { label: "Mujer y Equidad", title: "La Mujer y Equidad de Género", classes: "bg-pink-100 text-pink-800 border-pink-200" },
+    "honor-justicia": { label: "Honor y Justicia", title: "Comité de Honor y Justicia", classes: "bg-gray-100 text-gray-800 border-gray-200" },
+    electoral: { label: "Electoral", title: "Comité Electoral", classes: "bg-orange-100 text-orange-800 border-orange-200" },
+    consultorios: { label: "Consultorios", title: "Consultorios/Convenios", classes: "bg-lime-100 text-lime-800 border-lime-200" },
+    soporte: { label: "Soporte", title: "Soporte Técnico", classes: "bg-zinc-100 text-zinc-800 border-zinc-200" },
+    "region-tuxtepec": { label: "Región Tuxtepec", title: "Representante Regional Tuxtepec", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+    "region-pochutla": { label: "Región Pochutla", title: "Representante Regional Pochutla", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+    "region-valle-centrales": { label: "Valles Centrales", title: "Representante Regional Valles Centrales", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
   };
-  return (
-    map[r] || {
-      label: r || "Rol",
-      title: r || "Rol",
-      classes: "bg-slate-100 text-slate-800 border-slate-200",
-    }
-  );
+  return map[r] || { label: r || "Rol", title: r || "Rol", classes: "bg-slate-100 text-slate-800 border-slate-200" };
 }
