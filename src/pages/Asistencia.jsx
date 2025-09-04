@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // Catálogo de Secretarías/Comisiones
 const SECRETARIAS = [
@@ -40,6 +40,8 @@ const TIPOS_EVENTO = [
   "Reunión",
   "Otro",
 ];
+
+const MAX_ACUSE_MB = 4;
 
 const emailOk = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || "").trim());
 const phoneOk = (s) => /^[0-9\s+\-()]{7,20}$/.test((s || "").trim());
@@ -93,6 +95,53 @@ export default function Asistencia() {
       return next;
     });
 
+  // ---------- efectos para limpiar errores en tiempo real ----------
+  useEffect(() => {
+    if (acuse) {
+      // tamaño
+      const tooBig = acuse.size > MAX_ACUSE_MB * 1024 * 1024;
+      if (tooBig) {
+        setErrores((p) => ({ ...p, acuseSize: true }));
+      } else {
+        clearErr(["acuse", "acuseSize"]);
+      }
+    } else {
+      clearErr(["acuseSize"]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acuse]);
+
+  useEffect(() => {
+    if (confirmAcuse) clearErr("confirmAcuse");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmAcuse]);
+
+  useEffect(() => {
+    // Si cambias el número de días, resetea validaciones de fecha/periodos
+    clearErr(["diasSolicitados", "fechaUnica", "rangos", "rango", "desde", "hasta"]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diasSolicitados]);
+
+  useEffect(() => {
+    // Si ya no es facilidades, limpia cualquier error de esa sección
+    if (!esFacilidades) {
+      clearErr([
+        "diasSolicitados",
+        "fechaUnica",
+        "rangos",
+        "rango",
+        "desde",
+        "hasta",
+        "acuse",
+        "acuseSize",
+        "confirmAcuse",
+      ]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esFacilidades]);
+
+  // ---------------------------------------------------------------
+
   const addRango = () => {
     const e = {};
     if (!desde) e.desde = true;
@@ -141,6 +190,7 @@ export default function Asistencia() {
 
       // Archivo de acuse & confirmación
       if (!acuse) e.acuse = true;
+      if (acuse && acuse.size > MAX_ACUSE_MB * 1024 * 1024) e.acuseSize = true;
       if (!confirmAcuse) e.confirmAcuse = true;
     }
 
@@ -279,6 +329,7 @@ export default function Asistencia() {
     if (errores.tipoSolicitud) return "Selecciona el tipo de solicitud.";
     if (errores.fechaUnica) return "Selecciona la fecha solicitada.";
     if (errores.rangos) return "Agrega al menos un periodo de fechas.";
+    if (errores.acuseSize) return `El acuse excede ${MAX_ACUSE_MB} MB.`;
     if (errores.acuse || errores.confirmAcuse)
       return "Confirma el acuse entregado a RH.";
     if (errores.descripcion) return "Describe brevemente tu solicitud.";
@@ -610,20 +661,25 @@ export default function Asistencia() {
               <div className="grid md:grid-cols-2 gap-4 items-end">
                 <div>
                   <label className="block text-sm font-medium mb-1">
-                    Acuse entregado a RH (PDF/imagen, máx. 4MB)
+                    Acuse entregado a RH (PDF/imagen, máx. {MAX_ACUSE_MB}MB)
                   </label>
                   <input
                     type="file"
                     accept="application/pdf,image/*"
                     onChange={(e) => {
                       setAcuse(e.target.files?.[0] || null);
-                      clearErr("acuse");
                     }}
                     className={cx(
                       "block w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-0 file:bg-slate-900 file:text-white hover:file:bg-slate-800",
-                      err("acuse")
+                      err("acuse"),
+                      errores.acuseSize ? "ring-2 ring-red-500" : ""
                     )}
                   />
+                  {errores.acuseSize && (
+                    <p className="text-sm text-red-600 mt-1">
+                      El archivo excede {MAX_ACUSE_MB}MB.
+                    </p>
+                  )}
                 </div>
                 <label className="flex items-center gap-2">
                   <input
@@ -633,10 +689,7 @@ export default function Asistencia() {
                       err("confirmAcuse")
                     )}
                     checked={confirmAcuse}
-                    onChange={(e) => {
-                      setConfirmAcuse(e.target.checked);
-                      clearErr("confirmAcuse");
-                    }}
+                    onChange={(e) => setConfirmAcuse(e.target.checked)}
                   />
                   <span>Confirmo que ya entregué el acuse a RH.</span>
                 </label>
