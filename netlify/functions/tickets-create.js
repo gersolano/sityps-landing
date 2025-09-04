@@ -1,116 +1,112 @@
+// netlify/functions/tickets-create.js
+// ESM (Node 20): export named handler
 import { getStore } from '@netlify/blobs';
 
-/**
- * Crea un ticket y lo guarda en Netlify Blobs (store "sityps").
- * Espera JSON:
- * {
- *   nombre, correo, telefono,
- *   moduloDestino,            // p.ej. "escalafon", "organizacion", etc.
- *   tipo,                     // p.ej. "facilidades", "conflicto-laboral", ...
- *   unidadAdscripcion, descripcion,
- *   curp, rfc,
- *   acuseKey,                 // clave devuelta por /.netlify/functions/acuse-upload (opcional)
- *   facilidades: {            // solo cuando tipo === "facilidades"
- *     institucion,            // "Servicios de Salud de Oaxaca" | "Servicios de Salud IMSS-Bienestar"
- *     cantidadSolicitantes,   // número
- *     fechasSolicitadas,      // string legible, ej: "2025-09-10 → 2025-09-12, 2025-09-20"
- *     tipoEvento              // string
- *   }
- * }
- */
+// Utilidad: folio legible y único
+const folioId = () =>
+  `T-${Date.now().toString(36).toUpperCase()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)
+    .toUpperCase()}`;
+
 export async function handler(event) {
-  if (event.httpMethod !== 'POST') {
-    return json(405, { error: 'Method not allowed' });
-  }
-
-  let body = {};
   try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return json(400, { error: 'JSON inválido' });
-  }
+    if (event.httpMethod !== 'POST') {
+      return { statusCode: 405, body: 'Method Not Allowed' };
+    }
 
-  const {
-    nombre,
-    correo,
-    telefono,
-    moduloDestino,
-    tipo,
-    unidadAdscripcion,
-    descripcion,
-    curp,
-    rfc,
-    acuseKey = '',
-    facilidades, // { institucion, cantidadSolicitantes, fechasSolicitadas, tipoEvento }
-  } = body;
+    const data = JSON.parse(event.body || '{}');
 
-  // Validaciones mínimas
-  if (!nombre || !correo || !moduloDestino || !tipo || !descripcion) {
-    return json(400, { error: 'Faltan campos obligatorios' });
-  }
+    // Reglas mínimas
+    const required = ['nombre', 'correo', 'modulo', 'tipo', 'descripcion'];
+    for (const k of required) {
+      if (!data[k] || String(data[k]).trim() === '') {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ ok: false, error: `Falta ${k}` }),
+        };
+      }
+    }
 
-  const folio = genFolio();
-  const now = new Date().toISOString();
+    // Reglas extra si es "Facilidades administrativas"
+    if (data.tipo === 'Facilidades administrativas') {
+      if (!data.facilidades) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ ok: false, error: 'Faltan datos de facilidades' }),
+        };
+      }
+      const f = data.facilidades;
+      if (!Array.isArray(f.periodos) || f.periodos.length === 0) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ ok: false, error: 'Agrega al menos un periodo' }),
+        };
+      }
+      if (!f.confirmacionAcuseRH) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ ok: false, error: 'Confirma el acuse entregado a RH' }),
+        };
+      }
+    }
 
-  const ticket = {
-    folio,
-    submittedAt: now,
-    updatedAt: now,
+    // Preparar tienda de Blobs (auto ó manual)
+    const storeName = process.env.BLOBS_STORE_NAME || 'sityps-tickets';
+    const opts = { name: storeName };
+    if (process.env.NETLIFY_SITE_ID && process.env.NETLIFY_API_TOKEN) {
+      // Modo manual si existe token y siteID
+      opts.siteID = process.env.NETLIFY_SITE_ID;
+      opts.token = process.env.NETLIFY_API_TOKEN;
+    }
+    const store = getStore(opts);
 
-    moduloDestino: String(moduloDestino).toLowerCase(),
-    tipo: String(tipo).toLowerCase(),
+    const folio = folioId();
+    const now = new Date().toISOString();
 
-    nombre,
-    correo,
-    telefono: telefono || '',
-    unidadAdscripcion: unidadAdscripcion || '',
-    descripcion,
+    const ticket = {
+      folio,
+      creadoEn: now,
+      estado: 'Abierto',
+      prioridad: data.prioridad || 'Normal',
+      // Datos de contacto
+      nombre: data.nombre,
+      correo: data.correo,
+      telefono: data.telefono || '',
+      curp: data.curp || '',
+      rfc: data.rfc || '',
+      unidadAdscripcion: data.unidadAdscripcion || '',
+      // Clasificación
+      modulo: data.modulo,
+      tipo: data.tipo,
+      descripcion: data.descripcion,
+      // Facilidad (si aplica)
+      facilidades:
+        data.tipo === 'Facilidades administrativas' ? data.facilidades : null,
+      // Traza básica
+      traza: [
+        { t: now, e: 'creado', por: data.nombre || 'visitante', detalle: '' },
+      ],
+      // Destino sugerido (para filtros del backoffice)
+      destino: data.destino || data.modulo || '',
+      // Archivos (si el cliente subió acuse antes)
+      adjuntos: Array.isArray(data.adjuntos) ? data.adjuntos : [],
+    };
 
-    curp: (curp || '').toUpperCase(),
-    rfc: (rfc || '').toUpperCase(),
+    await store.setJSON(`tickets/${folio}.json`, ticket);
 
-    acuseKey: acuseKey || '',
-
-    estado: 'nuevo',
-    prioridad: 'Media',
-    asignadoA: '',
-
-    historico: [{ at: now, by: 'sistema', action: 'creado' }],
-  };
-
-  // Facilidades administrativas (opcional)
-  if (ticket.tipo === 'facilidades' && facilidades && typeof facilidades === 'object') {
-    ticket.facilidades = {
-      institucion: facilidades.institucion || '',
-      cantidadSolicitantes: Number(facilidades.cantidadSolicitantes || 1),
-      fechasSolicitadas: facilidades.fechasSolicitadas || '',
-      tipoEvento: facilidades.tipoEvento || '',
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true, folio }),
+    };
+  } catch (err) {
+    console.error('tickets-create error:', err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        error: String(err?.message || err),
+      }),
     };
   }
-
-  try {
-    const store = getStore({ name: 'sityps' });
-    await store.set(`tickets/${folio}.json`, JSON.stringify(ticket), {
-      contentType: 'application/json; charset=utf-8',
-    });
-    return json(200, { ok: true, ticket });
-  } catch (e) {
-    console.error(e);
-    return json(500, { error: 'No se pudo guardar el ticket' });
-  }
-}
-
-/* ---------------- utilidades --------------- */
-function json(status, data) {
-  return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify(data),
-  };
-}
-
-function genFolio() {
-  const ts = Date.now().toString(36).toUpperCase();
-  const rnd = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `T-${ts}-${rnd}`;
 }

@@ -1,50 +1,44 @@
+// netlify/functions/acuse-upload.js
+// Sube un archivo (acuse de RH) como Blob.
+// Espera body JSON: { fileName, fileB64 }  (fileB64 = base64 del archivo)
 import { getStore } from '@netlify/blobs';
 
 export async function handler(event) {
-  if (event.httpMethod !== 'POST') {
-    return json(405, { error: 'Method not allowed' });
-  }
-  let body = {};
   try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return json(400, { error: 'JSON inválido' });
-  }
-
-  const { filename, mime, base64 } = body;
-  if (!filename || !mime || !base64) {
-    return json(400, { error: 'Faltan datos del archivo' });
-  }
-
-  try {
-    // base64 puede venir como "data:<mime>;base64,XXXXX"
-    const b64 = String(base64);
-    const comma = b64.indexOf(',');
-    const raw = comma >= 0 ? b64.slice(comma + 1) : b64;
-    const buf = Buffer.from(raw, 'base64');
-
-    if (buf.length > 4 * 1024 * 1024) {
-      return json(413, { error: 'Archivo mayor a 4MB' });
+    if (event.httpMethod !== 'POST') {
+      return { statusCode: 405, body: 'Method Not Allowed' };
+    }
+    const { fileName, fileB64 } = JSON.parse(event.body || '{}');
+    if (!fileName || !fileB64) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ ok: false, error: 'Faltan fileName o fileB64' }),
+      };
     }
 
-    const key = `acuse/${Date.now()}-${slug(filename)}`;
-    const store = getStore({ name: 'sityps' });
+    const buf = Buffer.from(fileB64, 'base64');
+    const safeName = fileName.replace(/[^a-z0-9._-]/gi, '_');
+    const key = `adjuntos/acuse_${Date.now()}_${safeName}`;
 
-    await store.set(key, buf, { contentType: mime });
+    const storeName = process.env.BLOBS_STORE_NAME || 'sityps-tickets';
+    const opts = { name: storeName };
+    if (process.env.NETLIFY_SITE_ID && process.env.NETLIFY_API_TOKEN) {
+      opts.siteID = process.env.NETLIFY_SITE_ID;
+      opts.token = process.env.NETLIFY_API_TOKEN;
+    }
+    const store = getStore(opts);
 
-    return json(200, { ok: true, key });
-  } catch (e) {
-    console.error(e);
-    return json(500, { error: 'No se pudo subir el archivo' });
+    await store.set(key, buf, { contentType: 'application/octet-stream' });
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true, key }),
+    };
+  } catch (err) {
+    console.error('acuse-upload error:', err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ ok: false, error: String(err?.message || err) }),
+    };
   }
-}
-
-function slug(name) {
-  return String(name)
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9.\-_]+/g, '-')
-    .slice(0, 80);
-}
-function json(status, data) {
-  return { statusCode: status, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(data) };
 }
