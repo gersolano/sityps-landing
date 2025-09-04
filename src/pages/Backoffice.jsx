@@ -174,7 +174,12 @@ export default function Backoffice() {
                     timeStyle: "short",
                   })}
                 </td>
-                <td className="px-3 py-2">{r.moduloDestino}</td>
+
+                {/* Badge de módulo */}
+                <td className="px-3 py-2">
+                  <ModuleBadge modulo={r.moduloDestino} />
+                </td>
+
                 <td className="px-3 py-2">{r.tipo}</td>
                 <td className="px-3 py-2">{r.nombre}</td>
                 <td className="px-3 py-2">{r.prioridad}</td>
@@ -208,7 +213,7 @@ export default function Backoffice() {
                 })}
               </div>
               <div>
-                <b>Módulo:</b> {sel.moduloDestino}
+                <b>Módulo:</b> <ModuleBadge modulo={sel.moduloDestino} />
               </div>
               <div>
                 <b>Tipo:</b> {sel.tipo}
@@ -352,7 +357,7 @@ export default function Backoffice() {
   );
 }
 
-/* Badge por rol (mismo criterio) */
+/* Badge por rol (izquierda del título) */
 function RoleBadge({ role }) {
   const meta = roleMeta(role);
   return (
@@ -389,4 +394,37 @@ function roleMeta(role) {
     "region-valle-centrales": { label: "Valles Centrales", title: "Representante Regional Valles Centrales", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
   };
   return map[r] || { label: r || "Rol", title: r || "Rol", classes: "bg-slate-100 text-slate-800 border-slate-200" };
+}
+
+/* Badge de módulo (tabla y detalle) */
+function ModuleBadge({ modulo }) {
+  const meta = moduleMeta(modulo);
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.classes}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function moduleMeta(mod) {
+  const m = String(mod || "").toLowerCase().trim();
+  const map = {
+    afiliacion: { label: "Afiliación", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    demandas: { label: "Asuntos Laborales", classes: "bg-rose-50 text-rose-700 border-rose-200" },
+    finanzas: { label: "Finanzas", classes: "bg-amber-50 text-amber-700 border-amber-200" },
+    formacion: { label: "Formación", classes: "bg-sky-50 text-sky-700 border-sky-200" },
+    escalafon: { label: "Escalafón", classes: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+    prestaciones: { label: "Prestaciones", classes: "bg-teal-50 text-teal-700 border-teal-200" },
+    prensa: { label: "Prensa", classes: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200" },
+    cultura: { label: "Cultura/Deporte", classes: "bg-purple-50 text-purple-700 border-purple-200" },
+    equidad: { label: "Mujer y Equidad", classes: "bg-pink-50 text-pink-700 border-pink-200" },
+    "honor-justicia": { label: "Honor y Justicia", classes: "bg-gray-50 text-gray-700 border-gray-200" },
+    electoral: { label: "Electoral", classes: "bg-orange-50 text-orange-700 border-orange-200" },
+    consultorios: { label: "Consultorios", classes: "bg-lime-50 text-lime-700 border-lime-200" },
+    soporte: { label: "Soporte", classes: "bg-zinc-50 text-zinc-700 border-zinc-200" },
+    "region-tuxtepec": { label: "Región Tuxtepec", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+    "region-pochutla": { label: "Región Pochutla", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+    "region-valle-centrales": { label: "Valles Centrales", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+  };
+  return map[m] || { label: mod || "Módulo", classes: "bg-slate-50 text-slate-700 border-slate-200" };
 }
