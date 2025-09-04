@@ -13,6 +13,8 @@ import Contacto from "./pages/Contacto";
 import Aviso from "./pages/PrivacyNotice";
 import Preafiliacion from "./pages/Preafiliacion";
 import Asistencia from "./pages/Asistencia";
+import Admin from "./pages/Admin";
+import Backoffice from "./pages/Backoffice";
 
 /* Router por hash */
 function useHashRoute() {
@@ -54,6 +56,8 @@ export default function App() {
   else if (route === "/aviso-privacidad") Page = Aviso;
   else if (route === "/preafiliacion") Page = Preafiliacion;
   else if (route === "/asistencia") Page = Asistencia;
+  else if (route === "/admin") Page = Admin;
+  else if (route === "/backoffice") Page = Backoffice;
 
   return (
     <div className="min-h-screen bg-slate-50 pt-16 md:pt-20">
