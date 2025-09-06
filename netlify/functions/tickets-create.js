@@ -14,15 +14,12 @@ const trimOrEmpty = (v) => (v == null ? '' : String(v).trim());
 const parseISOorDMY = (s) => {
   if (!s) return null;
   const t = String(s).trim();
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  // DD/MM/YYYY
-  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t; // YYYY-MM-DD
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t); // DD/MM/YYYY
   if (m) {
     const [_, dd, mm, yyyy] = m;
     return `${yyyy}-${mm}-${dd}`;
   }
-  // como fallback, intentar Date
   const d = new Date(t);
   if (!isNaN(d)) {
     const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -34,18 +31,10 @@ const parseISOorDMY = (s) => {
 
 const normalizeModule = (body) =>
   trimOrEmpty(
-    body.modulo ??
-      body.moduloDestino ??
-      body.secretaria ??
-      body.secretariaDestino
+    body.modulo ?? body.moduloDestino ?? body.secretaria ?? body.secretariaDestino
   );
-
-const normalizeTipo = (body) =>
-  trimOrEmpty(body.tipo ?? body.tipoSolicitud);
-
-const normalizeUnidad = (body) =>
-  trimOrEmpty(body.unidadAdscripcion ?? body.unidad);
-
+const normalizeTipo = (body) => trimOrEmpty(body.tipo ?? body.tipoSolicitud);
+const normalizeUnidad = (body) => trimOrEmpty(body.unidadAdscripcion ?? body.unidad);
 const normalizeAdjuntos = (body) =>
   Array.isArray(body.adjuntos)
     ? body.adjuntos
@@ -58,7 +47,6 @@ const normalizeAdjuntos = (body) =>
 // ---------- destinos por módulo ----------
 function resolveRecipients(modulo) {
   const map = new Map([
-    // ajusta / añade más buzones cuando te indiquen los correos
     ['Secretaria de Organización, actas y acuerdos', process.env.TO_ACTAS],
   ]);
   const def = process.env.TICKETS_TO_DEFAULT;
@@ -70,8 +58,7 @@ function resolveRecipients(modulo) {
 
 // ---------- correo ----------
 async function sendMail(folio, ticket) {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SUBJECT_PREFIX } =
-    process.env;
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SUBJECT_PREFIX } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return;
 
   const transporter = nodemailer.createTransport({
@@ -105,6 +92,12 @@ Facilidades administrativas:
 `
     : '';
 
+  const adjuntosTxt = Array.isArray(ticket.adjuntos) && ticket.adjuntos.length
+    ? `Adjuntos (${ticket.adjuntos.length}): ${ticket.adjuntos
+        .map((a) => a.name)
+        .join(', ')}`
+    : 'Adjuntos: ninguno';
+
   const text = `Folio: ${folio}
 Creado: ${ticket.creadoEn}
 Módulo: ${ticket.modulo}
@@ -122,6 +115,7 @@ Descripción:
 ${ticket.descripcion}
 
 ${facilTxt}
+${adjuntosTxt}
 `;
 
   await transporter.sendMail({ from: SMTP_USER, to, subject, text });
@@ -140,7 +134,7 @@ export async function handler(event) {
 
     const body = JSON.parse(event.body || '{}');
 
-    // Normalizar campos base
+    // Base
     const nombre = trimOrEmpty(body.nombre ?? body.name);
     const correo = trimOrEmpty(body.correo ?? body.email);
     const telefono = trimOrEmpty(body.telefono ?? body.phone);
@@ -149,9 +143,10 @@ export async function handler(event) {
     const unidadAdscripcion = normalizeUnidad(body);
     const modulo = normalizeModule(body);
     const tipo = normalizeTipo(body);
-    const descripcion = trimOrEmpty(body.descripcion ?? body.descripcionCorta ?? body.descripcionLarga ?? body.desc);
+    const descripcion = trimOrEmpty(
+      body.descripcion ?? body.descripcionCorta ?? body.descripcionLarga ?? body.desc
+    );
 
-    // Validaciones base
     for (const [k, v] of [
       ['nombre', nombre],
       ['correo', correo],
@@ -160,41 +155,23 @@ export async function handler(event) {
       ['descripcion', descripcion],
     ]) {
       if (!v) {
-        return {
-          statusCode: 400,
-          body: JSON.stringify({ ok: false, error: `Falta ${k}` }),
-        };
+        return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Falta ${k}` }) };
       }
     }
 
-    // Normalizar facilidades (si aplica)
+    // Facilidad (opcional)
     let facilidades = null;
     if (tipo === 'Facilidades administrativas') {
-      const fRaw =
-        body.facilidades ?? body.fac ?? body.facilidadesAdmin ?? {};
-      const institucion = trimOrEmpty(
-        fRaw.institucion ?? fRaw.institución ?? fRaw.institution
-      );
-      const tipoEvento = trimOrEmpty(
-        fRaw.evento ?? fRaw.tipoEvento ?? fRaw.incidencia
-      );
-      const cantidadSolicitantes = Number(
-        fRaw.cantidadSolicitantes ?? fRaw.solicitantes ?? 0
-      );
-      const diasSolicitados = Number(
-        fRaw.diasSolicitados ?? fRaw.dias ?? fRaw.numDias ?? 0
-      );
+      const fRaw = body.facilidades ?? body.fac ?? body.facilidadesAdmin ?? {};
+      const institucion = trimOrEmpty(fRaw.institucion ?? fRaw.institución ?? fRaw.institution);
+      const tipoEvento = trimOrEmpty(fRaw.evento ?? fRaw.tipoEvento ?? fRaw.incidencia);
+      const cantidadSolicitantes = Number(fRaw.cantidadSolicitantes ?? fRaw.solicitantes ?? 0);
+      const diasSolicitados = Number(fRaw.diasSolicitados ?? fRaw.dias ?? fRaw.numDias ?? 0);
 
       const fechaUnica = parseISOorDMY(fRaw.fechaUnica ?? fRaw.fecha);
-
-      // periodos puede venir como {desde,hasta} o como array
       let periodos = [];
       const pRaw =
-        fRaw.periodos ??
-        fRaw.periodo ??
-        fRaw.periodosSolicitados ??
-        fRaw.rangos ??
-        null;
+        fRaw.periodos ?? fRaw.periodo ?? fRaw.periodosSolicitados ?? fRaw.rangos ?? null;
 
       if (Array.isArray(pRaw)) {
         periodos = pRaw
@@ -221,44 +198,29 @@ export async function handler(event) {
           fRaw.confirmacion
       );
 
-      // Validación de negocio
       if (!diasSolicitados || diasSolicitados < 1) {
         return {
           statusCode: 400,
-          body: JSON.stringify({
-            ok: false,
-            error: 'Indica número de días solicitados',
-          }),
+          body: JSON.stringify({ ok: false, error: 'Indica número de días solicitados' }),
         };
       }
       if (diasSolicitados === 1) {
         if (!fechaUnica) {
           return {
             statusCode: 400,
-            body: JSON.stringify({
-              ok: false,
-              error: 'Indica la fecha solicitada',
-            }),
+            body: JSON.stringify({ ok: false, error: 'Indica la fecha solicitada' }),
           };
         }
-      } else {
-        if (!periodos.length) {
-          return {
-            statusCode: 400,
-            body: JSON.stringify({
-              ok: false,
-              error: 'Agrega al menos un periodo de fechas',
-            }),
-          };
-        }
+      } else if (!periodos.length) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ ok: false, error: 'Agrega al menos un periodo de fechas' }),
+        };
       }
       if (!confirmacionAcuseRH) {
         return {
           statusCode: 400,
-          body: JSON.stringify({
-            ok: false,
-            error: 'Confirma el acuse entregado a RH',
-          }),
+          body: JSON.stringify({ ok: false, error: 'Confirma el acuse entregado a RH' }),
         };
       }
 
@@ -275,14 +237,11 @@ export async function handler(event) {
       };
     }
 
-    // Adjuntos opcionales (no el acuse RH; esos metadatos van en facilidades)
     const adjuntos = normalizeAdjuntos(body);
 
     // --- Netlify Blobs ---
     const storeName = process.env.BLOBS_STORE_NAME || 'sityps-tickets';
     const opts = { name: storeName };
-
-    // modo manual (build) por si la función no corre en Edge
     if (process.env.NETLIFY_SITE_ID && process.env.NETLIFY_API_TOKEN) {
       opts.siteID = process.env.NETLIFY_SITE_ID;
       opts.token = process.env.NETLIFY_API_TOKEN;
@@ -312,15 +271,9 @@ export async function handler(event) {
       destino: modulo,
     };
 
-    // Persistir JSON del ticket
     await store.setJSON(`tickets/${folio}.json`, ticket);
 
-    // Correo (no bloqueante)
-    try {
-      await sendMail(folio, ticket);
-    } catch (e) {
-      console.error('sendMail error:', e);
-    }
+    try { await sendMail(folio, ticket); } catch (e) { console.error('sendMail error:', e); }
 
     return {
       statusCode: 200,

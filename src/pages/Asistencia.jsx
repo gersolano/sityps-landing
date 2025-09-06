@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+/* Catálogos */
 const SECRETARIAS = [
   "Secretaría General",
   "Secretaria de Organización, actas y acuerdos",
@@ -42,10 +43,14 @@ const TIPO_SOLICITUD = [
   "Otro",
 ];
 
-function cx(...cls) { return cls.filter(Boolean).join(" "); }
+/* Helpers UI */
+const cx = (...k) => k.filter(Boolean).join(" ");
+const baseInput =
+  "w-full rounded-md border bg-white px-3 py-2 outline-none border-slate-300 focus:ring-2 focus:ring-red-300";
+const errInput = "border-red-500 ring-1 ring-red-400 focus:ring-red-400";
 
 export default function Asistencia() {
-  const [alert, setAlert] = useState(null);              // {type: 'error'|'ok', msg: string}
+  const [alert, setAlert] = useState(null);             // {type:'ok'|'error', msg}
   const [folioOK, setFolioOK] = useState("");
 
   // contacto
@@ -77,23 +82,27 @@ export default function Asistencia() {
 
   // adjuntos generales
   const [adjuntos, setAdjuntos] = useState([]);
-  const [adjuntosInfo, setAdjuntosInfo] = useState([]); // {name,size} p/mostrar
+  const [adjuntosInfo, setAdjuntosInfo] = useState([]); // {name,size}
 
   // descripción
   const [descripcion, setDescripcion] = useState("");
 
-  // errores para borde rojo
+  // errores -> dibuja borde rojo y mensaje
   const [errs, setErrs] = useState({});
+  const refs = useRef({}); // para hacer scroll al primer error
 
-  const isFacilidades = useMemo(() => tipo === "Facilidades administrativas", [tipo]);
+  const isFacilidades = useMemo(
+    () => tipo === "Facilidades administrativas",
+    [tipo]
+  );
   const diasNum = useMemo(() => Number(dias || 0), [dias]);
 
-  // ---------- Subida de ACUSE a función -----------
+  /* ---------- Subida de acuse RH (blobs) ---------- */
   async function onAcuseChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 4 * 1024 * 1024) {
-      setAlert({ type: "error", msg: "El acuse debe pesar máximo 4MB." });
+      setAlert({ type: "error", msg: "El acuse debe pesar máximo 4 MB." });
       return;
     }
     setAcuseUploading(true);
@@ -107,6 +116,7 @@ export default function Asistencia() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "No se pudo subir el acuse.");
+
       setAcuseKey(data.key || "");
       setAcuseName(file.name);
       setAlert({ type: "ok", msg: "Acuse subido correctamente." });
@@ -122,72 +132,84 @@ export default function Asistencia() {
   function onAdjuntosChange(e) {
     const files = Array.from(e.target.files || []);
     setAdjuntos(files);
-    setAdjuntosInfo(files.map(f => ({ name: f.name, size: f.size })));
+    setAdjuntosInfo(files.map((f) => ({ name: f.name, size: f.size })));
   }
 
-  // ------------- Validación (relajada para no bloquear por acuse) -------------
+  /* ---------- Validación ---------- */
   function validate() {
     const next = {};
-    const req = (v) => (v && String(v).trim().length > 0);
+    const req = (v) => v && String(v).trim().length > 0;
 
-    if (!req(nombre)) next.nombre = true;
-    if (!req(correo)) next.correo = true;
-    if (!req(modulo)) next.modulo = true;
-    if (!req(tipo)) next.tipo = true;
-    if (!req(descripcion)) next.descripcion = true;
+    if (!req(nombre)) next.nombre = "Indica tu nombre.";
+    if (!req(correo)) next.correo = "Indica tu correo.";
+    if (!req(modulo)) next.modulo = "Selecciona la secretaría destino.";
+    if (!req(tipo)) next.tipo = "Selecciona el tipo de solicitud.";
+    if (!req(descripcion)) next.descripcion = "Describe brevemente tu solicitud.";
 
     if (isFacilidades) {
-      if (!req(inst)) next.inst = true;
-      if (!req(evento)) next.evento = true;
-      if (!diasNum || diasNum < 1) next.dias = true;
+      if (!req(inst)) next.inst = "Selecciona la institución.";
+      if (!req(evento)) next.evento = "Selecciona el tipo de evento.";
+      if (!diasNum || diasNum < 1)
+        next.dias = "Indica el número de días solicitados.";
 
       if (diasNum === 1) {
-        if (!req(fecha)) next.fecha = true;
+        if (!req(fecha)) next.fecha = "Indica la fecha solicitada.";
       } else {
-        if (!req(fini)) next.fini = true;
-        if (!req(ffin)) next.ffin = true;
+        if (!req(fini)) next.fini = "Fecha inicial requerida.";
+        if (!req(ffin)) next.ffin = "Fecha final requerida.";
       }
-
-      // 🔴 Ahora solo pedimos CONFIRMAR el acuse (el archivo ya no bloquea).
-      if (!acuseConfirm) next.acuseConfirm = true;
+      if (!acuseConfirm)
+        next.acuseConfirm = "Debes confirmar que entregaste el acuse a RH.";
     }
 
     setErrs(next);
 
+    // Enfocar el primer campo con error
+    const firstKey = Object.keys(next)[0];
+    if (firstKey && refs.current[firstKey]) {
+      refs.current[firstKey].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
     if (Object.keys(next).length) {
-      if (next.acuseConfirm) {
-        setAlert({ type: "error", msg: "Marca la casilla de confirmación del acuse entregado a RH." });
-      } else if (next.dias || next.fecha || next.fini || next.ffin) {
-        setAlert({ type: "error", msg: "Indica número de días y las fechas solicitadas." });
-      } else {
-        setAlert({ type: "error", msg: "Completa los campos obligatorios marcados en rojo." });
-      }
+      setAlert({
+        type: "error",
+        msg: "Revisa los campos marcados en rojo.",
+      });
       return false;
     }
     setAlert(null);
     return true;
   }
 
-  // ---------------- Envío ----------------
+  /* ---------- Envío ---------- */
   async function onSubmit(e) {
     e.preventDefault();
     if (!validate()) return;
 
     const payload = {
-      nombre, correo, telefono, unidad, curp, rfc,
-      modulo, tipo, descripcion,
-      facilidades: isFacilidades ? {
-        institucion: inst,
-        evento,
-        cantidadSolicitantes: cantSolic,
-        diasSolicitados: diasNum,
-        fecha: diasNum === 1 ? fecha : null,
-        periodo: diasNum > 1 ? { desde: fini, hasta: ffin } : null,
-        acuseKey,        // puede venir vacío si no se subió
-        acuseName,       // nombre del acuse seleccionado
-        acuseConfirm,    // ✅ obligatorio
-      } : null,
-      adjuntos: adjuntosInfo,
+      nombre,
+      correo,
+      telefono,
+      unidad,
+      curp,
+      rfc,
+      modulo,
+      tipo,
+      descripcion,
+      facilidades: isFacilidades
+        ? {
+            institucion: inst,
+            evento,
+            cantidadSolicitantes: Number(cantSolic || 0),
+            diasSolicitados: diasNum,
+            fecha: diasNum === 1 ? fecha : null,
+            periodo: diasNum > 1 ? { desde: fini, hasta: ffin } : null,
+            acuseKey,   // puede ir vacío si no se sube archivo
+            acuseName,  // nombre del archivo subido (si hay)
+            acuseConfirm,
+          }
+        : null,
+      adjuntos: adjuntosInfo, // metadatos… el archivo se guarda por otro flujo si lo decides
     };
 
     try {
@@ -199,11 +221,10 @@ export default function Asistencia() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "No se pudo guardar el ticket.");
 
-      // mostrar folio
       setFolioOK(data.folio || "T-XXXX");
       setAlert({ type: "ok", msg: `¡Ticket registrado! Folio: ${data.folio}` });
 
-      // limpiar mínimos
+      // Limpiar
       setDescripcion("");
       setAdjuntos([]);
       setAdjuntosInfo([]);
@@ -227,10 +248,16 @@ export default function Asistencia() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {alert && (
-        <div className={cx(
-          "mb-6 rounded border px-4 py-3",
-          alert.type === "error" ? "bg-red-50 border-red-200 text-red-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"
-        )}>{alert.msg}</div>
+        <div
+          className={cx(
+            "mb-6 rounded border px-4 py-3",
+            alert.type === "error"
+              ? "bg-red-50 border-red-200 text-red-700"
+              : "bg-emerald-50 border-emerald-200 text-emerald-700"
+          )}
+        >
+          {alert.msg}
+        </div>
       )}
 
       <h1 className="text-3xl font-bold mb-2">Mesa de Asistencia</h1>
@@ -243,18 +270,53 @@ export default function Asistencia() {
         <section>
           <h2 className="text-xl font-semibold mb-4">Datos de contacto</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <input className={cx("input", errs.nombre && "border-red-400")} placeholder="Nombre completo"
-              value={nombre} onChange={e=>setNombre(e.target.value)} />
-            <input className={cx("input", errs.correo && "border-red-400")} placeholder="Correo" type="email"
-              value={correo} onChange={e=>setCorreo(e.target.value)} />
-            <input className="input" placeholder="Teléfono"
-              value={telefono} onChange={e=>setTelefono(e.target.value)} />
-            <input className="input" placeholder="Unidad de adscripción (opcional)"
-              value={unidad} onChange={e=>setUnidad(e.target.value)} />
-            <input className="input" placeholder="CURP (opcional)"
-              value={curp} onChange={e=>setCurp(e.target.value)} />
-            <input className="input" placeholder="RFC (opcional)"
-              value={rfc} onChange={e=>setRfc(e.target.value)} />
+            <div ref={(el) => (refs.current.nombre = el)}>
+              <input
+                id="nombre"
+                className={cx(baseInput, errs.nombre && errInput)}
+                placeholder="Nombre completo"
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+              />
+              {errs.nombre && <p className="text-sm text-red-600 mt-1">{errs.nombre}</p>}
+            </div>
+
+            <div ref={(el) => (refs.current.correo = el)}>
+              <input
+                id="correo"
+                type="email"
+                className={cx(baseInput, errs.correo && errInput)}
+                placeholder="Correo"
+                value={correo}
+                onChange={(e) => setCorreo(e.target.value)}
+              />
+              {errs.correo && <p className="text-sm text-red-600 mt-1">{errs.correo}</p>}
+            </div>
+
+            <input
+              className={baseInput}
+              placeholder="Teléfono"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+            />
+            <input
+              className={baseInput}
+              placeholder="Unidad de adscripción (opcional)"
+              value={unidad}
+              onChange={(e) => setUnidad(e.target.value)}
+            />
+            <input
+              className={baseInput}
+              placeholder="CURP (opcional)"
+              value={curp}
+              onChange={(e) => setCurp(e.target.value)}
+            />
+            <input
+              className={baseInput}
+              placeholder="RFC (opcional)"
+              value={rfc}
+              onChange={(e) => setRfc(e.target.value)}
+            />
           </div>
         </section>
 
@@ -262,16 +324,37 @@ export default function Asistencia() {
         <section>
           <h2 className="text-xl font-semibold mb-4">Clasificación</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <select className={cx("input", errs.modulo && "border-red-400")}
-              value={modulo} onChange={e=>setModulo(e.target.value)}>
-              <option value="">Secretaría / Módulo destino</option>
-              {SECRETARIAS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select className={cx("input", errs.tipo && "border-red-400")}
-              value={tipo} onChange={e=>setTipo(e.target.value)}>
-              <option value="">Tipo de solicitud</option>
-              {TIPO_SOLICITUD.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div ref={(el) => (refs.current.modulo = el)}>
+              <select
+                className={cx(baseInput, errs.modulo && errInput)}
+                value={modulo}
+                onChange={(e) => setModulo(e.target.value)}
+              >
+                <option value="">Secretaría / Módulo destino</option>
+                {SECRETARIAS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              {errs.modulo && <p className="text-sm text-red-600 mt-1">{errs.modulo}</p>}
+            </div>
+
+            <div ref={(el) => (refs.current.tipo = el)}>
+              <select
+                className={cx(baseInput, errs.tipo && errInput)}
+                value={tipo}
+                onChange={(e) => setTipo(e.target.value)}
+              >
+                <option value="">Tipo de solicitud</option>
+                {TIPO_SOLICITUD.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              {errs.tipo && <p className="text-sm text-red-600 mt-1">{errs.tipo}</p>}
+            </div>
           </div>
         </section>
 
@@ -281,32 +364,87 @@ export default function Asistencia() {
             <h3 className="font-semibold mb-4">Facilidades administrativas</h3>
 
             <div className="grid md:grid-cols-2 gap-4">
-              <select className={cx("input", errs.inst && "border-red-400")}
-                value={inst} onChange={e=>setInst(e.target.value)}>
-                {INSTITUCIONES.map(i => <option key={i} value={i}>{i}</option>)}
-              </select>
+              <div ref={(el) => (refs.current.inst = el)}>
+                <select
+                  className={cx(baseInput, errs.inst && errInput)}
+                  value={inst}
+                  onChange={(e) => setInst(e.target.value)}
+                >
+                  {INSTITUCIONES.map((i) => (
+                    <option key={i} value={i}>
+                      {i}
+                    </option>
+                  ))}
+                </select>
+                {errs.inst && <p className="text-sm text-red-600 mt-1">{errs.inst}</p>}
+              </div>
 
-              <input className="input" type="number" min="1" value={cantSolic}
-                onChange={e=>setCantSolic(e.target.value)} placeholder="Cantidad de solicitantes" />
+              <input
+                className={baseInput}
+                type="number"
+                min="1"
+                value={cantSolic}
+                onChange={(e) => setCantSolic(e.target.value)}
+                placeholder="Cantidad de solicitantes"
+              />
 
-              <select className={cx("input", errs.evento && "border-red-400")}
-                value={evento} onChange={e=>setEvento(e.target.value)}>
-                {EVENTOS.map(ev => <option key={ev} value={ev}>{ev}</option>)}
-              </select>
+              <div ref={(el) => (refs.current.evento = el)}>
+                <select
+                  className={cx(baseInput, errs.evento && errInput)}
+                  value={evento}
+                  onChange={(e) => setEvento(e.target.value)}
+                >
+                  {EVENTOS.map((ev) => (
+                    <option key={ev} value={ev}>
+                      {ev}
+                    </option>
+                  ))}
+                </select>
+                {errs.evento && <p className="text-sm text-red-600 mt-1">{errs.evento}</p>}
+              </div>
 
-              <input className={cx("input", errs.dias && "border-red-400")}
-                type="number" min="1" value={dias} onChange={e=>setDias(e.target.value)}
-                placeholder="Número de días solicitados" />
+              <div ref={(el) => (refs.current.dias = el)}>
+                <input
+                  className={cx(baseInput, errs.dias && errInput)}
+                  type="number"
+                  min="1"
+                  value={dias}
+                  onChange={(e) => setDias(e.target.value)}
+                  placeholder="Número de días solicitados"
+                />
+                {errs.dias && <p className="text-sm text-red-600 mt-1">{errs.dias}</p>}
+              </div>
 
               {diasNum === 1 ? (
-                <input className={cx("input md:col-span-2", errs.fecha && "border-red-400")}
-                  type="date" value={fecha} onChange={e=>setFecha(e.target.value)} />
+                <div className="md:col-span-2" ref={(el) => (refs.current.fecha = el)}>
+                  <input
+                    className={cx(baseInput, errs.fecha && errInput)}
+                    type="date"
+                    value={fecha}
+                    onChange={(e) => setFecha(e.target.value)}
+                  />
+                  {errs.fecha && <p className="text-sm text-red-600 mt-1">{errs.fecha}</p>}
+                </div>
               ) : (
                 <>
-                  <input className={cx("input", errs.fini && "border-red-400")}
-                    type="date" value={fini} onChange={e=>setFini(e.target.value)} />
-                  <input className={cx("input", errs.ffin && "border-red-400")}
-                    type="date" value={ffin} onChange={e=>setFfin(e.target.value)} />
+                  <div ref={(el) => (refs.current.fini = el)}>
+                    <input
+                      className={cx(baseInput, errs.fini && errInput)}
+                      type="date"
+                      value={fini}
+                      onChange={(e) => setFini(e.target.value)}
+                    />
+                    {errs.fini && <p className="text-sm text-red-600 mt-1">{errs.fini}</p>}
+                  </div>
+                  <div ref={(el) => (refs.current.ffin = el)}>
+                    <input
+                      className={cx(baseInput, errs.ffin && errInput)}
+                      type="date"
+                      value={ffin}
+                      onChange={(e) => setFfin(e.target.value)}
+                    />
+                    {errs.ffin && <p className="text-sm text-red-600 mt-1">{errs.ffin}</p>}
+                  </div>
                 </>
               )}
             </div>
@@ -315,37 +453,53 @@ export default function Asistencia() {
             <div className="mt-4 grid md:grid-cols-2 gap-4 items-start">
               <div>
                 <label className="block text-sm text-slate-600 mb-1">
-                  Acuse entregado a RH (PDF/imagen, máx. 4MB)
+                  Acuse entregado a RH (PDF/imagen, máx. 4 MB)
                 </label>
                 <input type="file" accept=".pdf,image/*" onChange={onAcuseChange} />
-                <div className="text-sm mt-1">
-                  {acuseUploading ? "Subiendo acuse…" : acuseName ? `Archivo: ${acuseName}` : null}
-                </div>
+                <p className="text-sm mt-1">
+                  {acuseUploading
+                    ? "Subiendo acuse…"
+                    : acuseName
+                    ? `Archivo: ${acuseName}`
+                    : "Puedes adjuntar el acuse aquí (recomendado)."}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Nota: además del acuse, abajo puedes adjuntar documentos adicionales (oficios, evidencias, etc.).
+                </p>
               </div>
 
-              <label className="inline-flex items-center gap-2 mt-2">
-                <input type="checkbox" checked={acuseConfirm}
-                  onChange={(e)=>setAcuseConfirm(e.target.checked)} />
-                <span>Confirmo que ya entregué el acuse a RH.</span>
-              </label>
-              {errs.acuseConfirm && (
-                <div className="text-sm text-red-600 md:col-span-2">
-                  Debes marcar esta confirmación.
-                </div>
-              )}
+              <div ref={(el) => (refs.current.acuseConfirm = el)} className="mt-2">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={acuseConfirm}
+                    onChange={(e) => setAcuseConfirm(e.target.checked)}
+                  />
+                  <span>Confirmo que ya entregué el acuse a RH.</span>
+                </label>
+                {errs.acuseConfirm && (
+                  <p className="text-sm text-red-600 mt-1">{errs.acuseConfirm}</p>
+                )}
+              </div>
             </div>
           </section>
         )}
 
         {/* Descripción */}
-        <section>
+        <section ref={(el) => (refs.current.descripcion = el)}>
           <h2 className="text-xl font-semibold mb-2">Descripción</h2>
-          <textarea className={cx("input min-h-[140px]", errs.descripcion && "border-red-400")}
+          <textarea
+            className={cx(baseInput, "min-h-[220px]", errs.descripcion && errInput)}
             placeholder="Describe brevemente tu solicitud o problema…"
-            value={descripcion} onChange={e=>setDescripcion(e.target.value)} />
+            value={descripcion}
+            onChange={(e) => setDescripcion(e.target.value)}
+          />
+          {errs.descripcion && (
+            <p className="text-sm text-red-600 mt-1">{errs.descripcion}</p>
+          )}
         </section>
 
-        {/* Adjuntos generales */}
+        {/* Adjuntos generales (para cualquier tipo de solicitud) */}
         <section>
           <h2 className="text-xl font-semibold mb-2">Adjuntar archivos</h2>
           <input multiple type="file" onChange={onAdjuntosChange} />
@@ -356,8 +510,10 @@ export default function Asistencia() {
           )}
         </section>
 
-        <button type="submit"
-          className="inline-flex items-center justify-center rounded-md bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 font-medium">
+        <button
+          type="submit"
+          className="inline-flex items-center justify-center rounded-md bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 font-medium"
+        >
           Registrar ticket
         </button>
       </form>
@@ -367,10 +523,14 @@ export default function Asistencia() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full">
             <h4 className="text-xl font-semibold mb-2">¡Ticket registrado!</h4>
-            <p className="mb-6">Tu folio es <b>{folioOK}</b>.</p>
+            <p className="mb-6">
+              Tu folio es <b>{folioOK}</b>.
+            </p>
             <div className="text-right">
-              <button onClick={() => setFolioOK("")}
-                className="rounded-md bg-slate-800 hover:bg-slate-900 text-white px-4 py-2">
+              <button
+                onClick={() => setFolioOK("")}
+                className="rounded-md bg-slate-800 hover:bg-slate-900 text-white px-4 py-2"
+              >
                 Aceptar
               </button>
             </div>
@@ -380,7 +540,3 @@ export default function Asistencia() {
     </div>
   );
 }
-
-/* Tailwind helper si falta:
-.input { @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-red-300; }
-*/
