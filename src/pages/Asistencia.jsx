@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+// src/pages/Asistencia.jsx
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /* Catálogos */
 const SECRETARIAS = [
@@ -43,14 +44,18 @@ const TIPO_SOLICITUD = [
   "Otro",
 ];
 
-/* Helpers UI */
+// Helpers UI
 const cx = (...k) => k.filter(Boolean).join(" ");
 const baseInput =
   "w-full rounded-md border bg-white px-3 py-2 outline-none border-slate-300 focus:ring-2 focus:ring-red-300";
 const errInput = "border-red-500 ring-1 ring-red-400 focus:ring-red-400";
+const errStyle = (on) => (on ? { borderColor: "#ef4444", boxShadow: "0 0 0 1px #fca5a5 inset" } : undefined);
+
+// LocalStorage
+const PROFILE_KEY = "asistencia_profile_v1";
 
 export default function Asistencia() {
-  const [alert, setAlert] = useState(null);             // {type:'ok'|'error', msg}
+  const [alert, setAlert] = useState(null); // {type:'ok'|'error', msg}
   const [folioOK, setFolioOK] = useState("");
 
   // contacto
@@ -74,22 +79,22 @@ export default function Asistencia() {
   const [fini, setFini] = useState("");
   const [ffin, setFfin] = useState("");
 
-  // acuse RH
+  // acuse RH (opcional recomendado)
   const [acuseKey, setAcuseKey] = useState("");
   const [acuseName, setAcuseName] = useState("");
   const [acuseUploading, setAcuseUploading] = useState(false);
   const [acuseConfirm, setAcuseConfirm] = useState(false);
 
-  // adjuntos generales
+  // adjuntos globales
   const [adjuntos, setAdjuntos] = useState([]);
   const [adjuntosInfo, setAdjuntosInfo] = useState([]); // {name,size}
 
   // descripción
   const [descripcion, setDescripcion] = useState("");
 
-  // errores -> dibuja borde rojo y mensaje
+  // errores
   const [errs, setErrs] = useState({});
-  const refs = useRef({}); // para hacer scroll al primer error
+  const refs = useRef({});
 
   const isFacilidades = useMemo(
     () => tipo === "Facilidades administrativas",
@@ -97,7 +102,30 @@ export default function Asistencia() {
   );
   const diasNum = useMemo(() => Number(dias || 0), [dias]);
 
-  /* ---------- Subida de acuse RH (blobs) ---------- */
+  // Cargar perfil
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PROFILE_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        setNombre(p.nombre || "");
+        setCorreo(p.correo || "");
+        setTelefono(p.telefono || "");
+        setUnidad(p.unidad || "");
+        setCurp(p.curp || "");
+        setRfc(p.rfc || "");
+      }
+    } catch {}
+  }, []);
+
+  // Guardar perfil (datos de contacto) al vuelo
+  useEffect(() => {
+    const p = { nombre, correo, telefono, unidad, curp, rfc };
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+    } catch {}
+  }, [nombre, correo, telefono, unidad, curp, rfc]);
+
   async function onAcuseChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -135,7 +163,7 @@ export default function Asistencia() {
     setAdjuntosInfo(files.map((f) => ({ name: f.name, size: f.size })));
   }
 
-  /* ---------- Validación ---------- */
+  // Validación
   function validate() {
     const next = {};
     const req = (v) => v && String(v).trim().length > 0;
@@ -149,39 +177,34 @@ export default function Asistencia() {
     if (isFacilidades) {
       if (!req(inst)) next.inst = "Selecciona la institución.";
       if (!req(evento)) next.evento = "Selecciona el tipo de evento.";
-      if (!diasNum || diasNum < 1)
-        next.dias = "Indica el número de días solicitados.";
-
+      if (!diasNum || diasNum < 1) next.dias = "Indica el número de días solicitados.";
       if (diasNum === 1) {
         if (!req(fecha)) next.fecha = "Indica la fecha solicitada.";
       } else {
         if (!req(fini)) next.fini = "Fecha inicial requerida.";
         if (!req(ffin)) next.ffin = "Fecha final requerida.";
       }
-      if (!acuseConfirm)
-        next.acuseConfirm = "Debes confirmar que entregaste el acuse a RH.";
+      if (!acuseConfirm) next.acuseConfirm = "Debes confirmar que entregaste el acuse a RH.";
+      // Si quieres forzar archivo:
+      // if (!acuseKey) next.acuseConfirm = "Adjunta el acuse de RH.";
     }
 
     setErrs(next);
 
-    // Enfocar el primer campo con error
     const firstKey = Object.keys(next)[0];
     if (firstKey && refs.current[firstKey]) {
       refs.current[firstKey].scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
     if (Object.keys(next).length) {
-      setAlert({
-        type: "error",
-        msg: "Revisa los campos marcados en rojo.",
-      });
+      setAlert({ type: "error", msg: "Revisa los campos marcados en rojo." });
       return false;
     }
     setAlert(null);
     return true;
   }
 
-  /* ---------- Envío ---------- */
+  // Envío
   async function onSubmit(e) {
     e.preventDefault();
     if (!validate()) return;
@@ -204,12 +227,12 @@ export default function Asistencia() {
             diasSolicitados: diasNum,
             fecha: diasNum === 1 ? fecha : null,
             periodo: diasNum > 1 ? { desde: fini, hasta: ffin } : null,
-            acuseKey,   // puede ir vacío si no se sube archivo
-            acuseName,  // nombre del archivo subido (si hay)
+            acuseKey,
+            acuseName,
             acuseConfirm,
           }
         : null,
-      adjuntos: adjuntosInfo, // metadatos… el archivo se guarda por otro flujo si lo decides
+      adjuntos: adjuntosInfo,
     };
 
     try {
@@ -224,10 +247,13 @@ export default function Asistencia() {
       setFolioOK(data.folio || "T-XXXX");
       setAlert({ type: "ok", msg: `¡Ticket registrado! Folio: ${data.folio}` });
 
-      // Limpiar
+      // Limpiar (para NUEVA asistencia). Conservamos los datos de contacto.
+      setModulo("");
+      setTipo("");
       setDescripcion("");
       setAdjuntos([]);
       setAdjuntosInfo([]);
+
       if (isFacilidades) {
         setAcuseKey("");
         setAcuseName("");
@@ -245,6 +271,32 @@ export default function Asistencia() {
     }
   }
 
+  // Reset TOTAL + borrar perfil
+  function resetAll() {
+    setNombre("");
+    setCorreo("");
+    setTelefono("");
+    setUnidad("");
+    setCurp("");
+    setRfc("");
+    setModulo("");
+    setTipo("");
+    setDescripcion("");
+    setAdjuntos([]);
+    setAdjuntosInfo([]);
+    setInst(INSTITUCIONES[0]);
+    setEvento("Capacitación");
+    setCantSolic("1");
+    setDias("1");
+    setFecha("");
+    setFini("");
+    setFfin("");
+    setAcuseKey("");
+    setAcuseName("");
+    setAcuseConfirm(false);
+    try { localStorage.removeItem(PROFILE_KEY); } catch {}
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {alert && (
@@ -260,10 +312,22 @@ export default function Asistencia() {
         </div>
       )}
 
-      <h1 className="text-3xl font-bold mb-2">Mesa de Asistencia</h1>
-      <p className="text-slate-600 mb-8">
-        ¿Tienes una solicitud o problema? Registra tu ticket y el equipo correspondiente te atenderá.
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Mesa de Asistencia</h1>
+          <p className="text-slate-600 mb-4">
+            ¿Tienes una solicitud o problema? Registra tu ticket y el equipo correspondiente te atenderá.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={resetAll}
+          className="h-10 shrink-0 rounded-md border px-4 font-medium hover:bg-slate-50"
+          title="Borrar todos los campos y el autocompletado"
+        >
+          Limpiar todo
+        </button>
+      </div>
 
       <form onSubmit={onSubmit} className="space-y-8">
         {/* Contacto */}
@@ -274,6 +338,7 @@ export default function Asistencia() {
               <input
                 id="nombre"
                 className={cx(baseInput, errs.nombre && errInput)}
+                style={errStyle(!!errs.nombre)}
                 placeholder="Nombre completo"
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
@@ -286,6 +351,7 @@ export default function Asistencia() {
                 id="correo"
                 type="email"
                 className={cx(baseInput, errs.correo && errInput)}
+                style={errStyle(!!errs.correo)}
                 placeholder="Correo"
                 value={correo}
                 onChange={(e) => setCorreo(e.target.value)}
@@ -327,6 +393,7 @@ export default function Asistencia() {
             <div ref={(el) => (refs.current.modulo = el)}>
               <select
                 className={cx(baseInput, errs.modulo && errInput)}
+                style={errStyle(!!errs.modulo)}
                 value={modulo}
                 onChange={(e) => setModulo(e.target.value)}
               >
@@ -343,6 +410,7 @@ export default function Asistencia() {
             <div ref={(el) => (refs.current.tipo = el)}>
               <select
                 className={cx(baseInput, errs.tipo && errInput)}
+                style={errStyle(!!errs.tipo)}
                 value={tipo}
                 onChange={(e) => setTipo(e.target.value)}
               >
@@ -367,6 +435,7 @@ export default function Asistencia() {
               <div ref={(el) => (refs.current.inst = el)}>
                 <select
                   className={cx(baseInput, errs.inst && errInput)}
+                  style={errStyle(!!errs.inst)}
                   value={inst}
                   onChange={(e) => setInst(e.target.value)}
                 >
@@ -391,6 +460,7 @@ export default function Asistencia() {
               <div ref={(el) => (refs.current.evento = el)}>
                 <select
                   className={cx(baseInput, errs.evento && errInput)}
+                  style={errStyle(!!errs.evento)}
                   value={evento}
                   onChange={(e) => setEvento(e.target.value)}
                 >
@@ -406,6 +476,7 @@ export default function Asistencia() {
               <div ref={(el) => (refs.current.dias = el)}>
                 <input
                   className={cx(baseInput, errs.dias && errInput)}
+                  style={errStyle(!!errs.dias)}
                   type="number"
                   min="1"
                   value={dias}
@@ -419,6 +490,7 @@ export default function Asistencia() {
                 <div className="md:col-span-2" ref={(el) => (refs.current.fecha = el)}>
                   <input
                     className={cx(baseInput, errs.fecha && errInput)}
+                    style={errStyle(!!errs.fecha)}
                     type="date"
                     value={fecha}
                     onChange={(e) => setFecha(e.target.value)}
@@ -430,6 +502,7 @@ export default function Asistencia() {
                   <div ref={(el) => (refs.current.fini = el)}>
                     <input
                       className={cx(baseInput, errs.fini && errInput)}
+                      style={errStyle(!!errs.fini)}
                       type="date"
                       value={fini}
                       onChange={(e) => setFini(e.target.value)}
@@ -439,6 +512,7 @@ export default function Asistencia() {
                   <div ref={(el) => (refs.current.ffin = el)}>
                     <input
                       className={cx(baseInput, errs.ffin && errInput)}
+                      style={errStyle(!!errs.ffin)}
                       type="date"
                       value={ffin}
                       onChange={(e) => setFfin(e.target.value)}
@@ -449,7 +523,7 @@ export default function Asistencia() {
               )}
             </div>
 
-            {/* Acuse RH */}
+            {/* Acuse RH (opcional + confirmación obligatoria) */}
             <div className="mt-4 grid md:grid-cols-2 gap-4 items-start">
               <div>
                 <label className="block text-sm text-slate-600 mb-1">
@@ -462,9 +536,6 @@ export default function Asistencia() {
                     : acuseName
                     ? `Archivo: ${acuseName}`
                     : "Puedes adjuntar el acuse aquí (recomendado)."}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Nota: además del acuse, abajo puedes adjuntar documentos adicionales (oficios, evidencias, etc.).
                 </p>
               </div>
 
@@ -490,6 +561,7 @@ export default function Asistencia() {
           <h2 className="text-xl font-semibold mb-2">Descripción</h2>
           <textarea
             className={cx(baseInput, "min-h-[220px]", errs.descripcion && errInput)}
+            style={errStyle(!!errs.descripcion)}
             placeholder="Describe brevemente tu solicitud o problema…"
             value={descripcion}
             onChange={(e) => setDescripcion(e.target.value)}
@@ -499,7 +571,7 @@ export default function Asistencia() {
           )}
         </section>
 
-        {/* Adjuntos generales (para cualquier tipo de solicitud) */}
+        {/* Adjuntos generales */}
         <section>
           <h2 className="text-xl font-semibold mb-2">Adjuntar archivos</h2>
           <input multiple type="file" onChange={onAdjuntosChange} />
@@ -523,15 +595,13 @@ export default function Asistencia() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full">
             <h4 className="text-xl font-semibold mb-2">¡Ticket registrado!</h4>
-            <p className="mb-6">
-              Tu folio es <b>{folioOK}</b>.
-            </p>
+            <p className="mb-6">Tu folio es <b>{folioOK}</b>.</p>
             <div className="text-right">
               <button
                 onClick={() => setFolioOK("")}
                 className="rounded-md bg-slate-800 hover:bg-slate-900 text-white px-4 py-2"
               >
-                Aceptar
+                Nueva solicitud
               </button>
             </div>
           </div>
