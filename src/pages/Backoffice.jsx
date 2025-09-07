@@ -164,10 +164,13 @@ export default function Backoffice() {
             {rows.map((r) => (
               <tr
                 key={r.folio}
-                className="border-t hover:bg-slate-50 cursor-pointer"
-                onClick={() => onRowClick(r.folio)}
+                className="border-t hover:bg-slate-50"
               >
-                <td className="px-3 py-2">{r.folio}</td>
+                <td className="px-3 py-2">
+                  <a className="text-sky-700 underline" href={`#/backoffice/ticket/${r.folio}`}>
+                    {r.folio}
+                  </a>
+                </td>
                 <td className="px-3 py-2">
                   {new Date(r.submittedAt).toLocaleString("es-MX", {
                     dateStyle: "medium",
@@ -197,7 +200,7 @@ export default function Backoffice() {
         </table>
       </div>
 
-      {/* Detalle */}
+      {/* Detalle lateral (opcional, al hacer clic en una fila) */}
       {sel && (
         <div className="mt-6 grid md:grid-cols-2 gap-4">
           <div className="rounded-xl border p-4">

@@ -15,6 +15,7 @@ import Preafiliacion from "./pages/Preafiliacion";
 import Asistencia from "./pages/Asistencia";
 import Admin from "./pages/Admin";
 import Backoffice from "./pages/Backoffice";
+import TicketDetalle from "./pages/TicketDetalle";
 
 /* Router por hash */
 function useHashRoute() {
@@ -58,6 +59,7 @@ export default function App() {
   else if (route === "/asistencia") Page = Asistencia;
   else if (route === "/admin") Page = Admin;
   else if (route === "/backoffice") Page = Backoffice;
+  else if (route.startsWith("/backoffice/ticket/")) Page = TicketDetalle;
 
   return (
     <div className="min-h-screen bg-slate-50 pt-16 md:pt-20">
