@@ -14,6 +14,8 @@ function isEmail(x){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x||"").trim
 function uniq(a){ return [...new Set((a||[]).filter(Boolean))]; }
 function splitEmails(v){ return String(v||"").split(/[;,]/g).map(s=>s.trim()).filter(isEmail); }
 function preview(t,n=240){ const s=String(t||""); return s.length>n?s.slice(0,n)+"…":s; }
+function safe(x){ return String(x??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function ucFirst(str){ return String(str||"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase()); }
 
 /* Normalizar ticket */
 function normalizeTicketForSave(t){
@@ -66,7 +68,7 @@ const MOD_TO_ENV=[
   {match:/soporte|t[eé]cnico/i,env:"TO_SOPORTE"},
 ];
 
-/* ===== Plantilla HTML (mismo look que create) ===== */
+/* ===== Plantilla HTML ===== */
 function baseStyles(){ return `
   .wrap{max-width:640px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
   .hdr{background:#7a0c0c;color:#fff;padding:16px 20px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial}
@@ -89,9 +91,6 @@ function baseStyles(){ return `
     .muted{color:#9ca3af}
     .foot{color:#9ca3af}
   }`; }
-function safe(x){ return String(x??"")
-  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-  .replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function htmlTicketBlock(t){
   const facil = t.facilidades ? `
     <div class="section">
@@ -133,7 +132,7 @@ function buildHtmlEmail({title,intro,ticket,changesHtml,footerNote}){
 </div></body></html>`;
 }
 
-/* ===== Recipients ===== */
+/* Destinatarios */
 function computeRecipientsOnUpdate(ticket, cambios){
   const dest=[];
   if (process.env.TICKETS_TO_DEFAULT) dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
@@ -188,7 +187,7 @@ exports.handler = async (event) => {
 
     ticket = normalizeTicketForSave(ticket);
 
-    // Permisos (si usas JWT; si no, esto permitirá editar igual al no tener claims)
+    // Permisos (si usas JWT; si no, edita igual)
     const claims = readClaims(event);
     if (!canEdit(ticket, claims))
       return { statusCode:403, body:JSON.stringify({ok:false, error:"No autorizado"}) };
@@ -202,7 +201,7 @@ exports.handler = async (event) => {
       ticket.estado = mapEstado(cambios.estado);
       if (ticket.estado !== prev) {
         hist.push({ at: nowISO(), by, action: "estado", value: ticket.estado });
-        cambiosAplicados.estado = `${prev} → ${ticket.estado}`;
+        cambiosAplicados.estado = `${ucFirst(prev)} → ${ucFirst(ticket.estado)}`;
       }
     }
     if ("prioridad" in cambios && cambios.prioridad) {
@@ -238,20 +237,30 @@ exports.handler = async (event) => {
         const toList = computeRecipientsOnUpdate(ticket, cambios);
         if (toList.length > 0) {
           const transport = makeTransport();
-          const subject = `[${process.env.SUBJECT_PREFIX || "SITYPS"}] Ticket ${ticket.folio} actualizado`;
+          const pref = process.env.SUBJECT_PREFIX || "SITYPS";
+          const main = cambiosAplicados.estado ? `Estado: ${ucFirst(ticket.estado)}` :
+                       cambiosAplicados.prioridad ? `Prioridad: ${ticket.prioridad}` :
+                       cambiosAplicados.asignacion ? `Asignación` : `Actualización`;
+          const subject = `${pref} · Ticket ${ticket.folio} actualizado — ${ticket.nombre} — ${main}`;
+
           const text =
             `Folio: ${ticket.folio}\nFecha: ${new Date(ticket.submittedAt).toLocaleString("es-MX")}\n` +
             `Módulo: ${ticket.moduloDestino}\nTipo: ${ticket.tipo}\n` +
             `Solicitante: ${ticket.nombre} <${ticket.correo}>\nUnidad: ${ticket.unidadAdscripcion}\n` +
             `Desc: ${preview(ticket.descripcion)}\n\n` +
             `Cambios:\n${Object.entries(cambiosAplicados).map(([k,v])=>`- ${k}: ${v}`).join("\n") || "—"}\n`;
+
           const html = buildHtmlEmail({
             title: "Ticket actualizado",
             intro: "Se registraron cambios en tu ticket.",
             ticket,
-            changesHtml: htmlChangesList(cambiosAplicados),
+            changesHtml: (function(c){ 
+              const items = Object.entries(c||{}).map(([k,v])=>`<li><strong>${safe(k)}:</strong> ${safe(v)}</li>`).join("") || "<li>—</li>";
+              return `<ul class="changes">${items}</ul>`;
+            })(cambiosAplicados),
             footerNote: "Puedes dar seguimiento desde el backoffice.",
           });
+
           await transport.sendMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
             to: toList.join(", "),

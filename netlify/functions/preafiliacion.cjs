@@ -1,150 +1,277 @@
-// netlify/functions/preafiliacion.cjs
-const fs = require("fs");
-const path = require("path");
+/* eslint-disable */
 const nodemailer = require("nodemailer");
 
-/* ---------- helpers de respuesta (JSON SIEMPRE) ---------- */
-function j(code, ok, message, extra = {}) {
-  return {
-    statusCode: code,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    },
-    body: JSON.stringify({ ok, message, ...extra }),
-  };
+/* =========================
+   Utils
+   ========================= */
+function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || "").trim()); }
+function nowISO() { return new Date().toISOString(); }
+function preview(text, n = 240) {
+  const s = String(text || "");
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+function safe(x) {
+  return String(x ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function splitEmails(value) {
+  return String(value || "")
+    .split(/[;,]/g)
+    .map((s) => s.trim())
+    .filter(isEmail);
+}
+function uniq(arr) { return [...new Set((arr || []).filter(Boolean))]; }
+function displayName(nombres, ap, am) {
+  return [nombres, ap, am].map(s => String(s || "").trim()).filter(Boolean).join(" ");
 }
 
-/* ---------- config opcional local ---------- */
-let CONFIG = {};
-try {
-  const cfgPath = path.join(__dirname, "..", "..", "sityps.config.json");
-  CONFIG = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-} catch { CONFIG = {}; }
-
-/* ---------- campos permitidos / orden CSV ---------- */
-const ALLOWED_FIELDS = [
-  "nombres","apellidoPaterno","apellidoMaterno",
-  "curp","rfc","nss",
-  "telefono","correo",
-  "seccion","empresa",
-  "domicilio","municipio","estado",
-  "observaciones",
-];
-
-/* =================== HANDLER =================== */
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return j(405, false, "Method Not Allowed");
-
-  // 1) Parseo body
-  let data = {};
-  try {
-    const ctype = (event.headers["content-type"] || "").toLowerCase();
-    if (ctype.includes("application/json")) {
-      data = JSON.parse(event.body || "{}");
-    } else if (ctype.includes("application/x-www-form-urlencoded")) {
-      data = Object.fromEntries(new URLSearchParams(event.body));
-    } else {
-      data = JSON.parse(event.body || "{}");
-    }
-  } catch {
-    return j(400, false, "Cuerpo inválido");
-  }
-
-  // 2) Reglas mínimas
-  const required = [
-    "nombres","apellidoPaterno","apellidoMaterno",
-    "curp","rfc","telefono","correo",
-    "seccion","empresa","domicilio","municipio","estado",
-  ];
-  for (const k of required) {
-    if (!data[k]) return j(400, false, `Falta ${k}`);
-  }
-  if (!data.privacyAccepted || String(data.privacyAccepted).toLowerCase() === "false") {
-    return j(400, false, "Debes aceptar el aviso de privacidad");
-  }
-
-  // 3) Validaciones MX
-  const CURP = /^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$/i;
-  const RFC  = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/i;
-  if (!CURP.test(data.curp)) return j(400, false, "CURP inválida");
-  if (!RFC.test(data.rfc))   return j(400, false, "RFC inválido");
-
-  // 4) reCAPTCHA v2 (si está configurado)
-  if (process.env.RECAPTCHA_SECRET) {
-    const token = data.recaptchaToken || data["g-recaptcha-response"];
-    if (!token) return j(400, false, "Completa el reCAPTCHA");
-    try {
-      const params = new URLSearchParams({ secret: process.env.RECAPTCHA_SECRET, response: token });
-      const resp = await fetch("https://www.google.com/recaptcha/api/siteverify", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params.toString(),
-      });
-      const verify = await resp.json();
-      if (!verify.success) return j(400, false, "Falló reCAPTCHA");
-    } catch {
-      return j(400, false, "Error al verificar reCAPTCHA");
-    }
-  }
-
-  // 5) Sanitizar: quitar internos
-  delete data.recaptchaToken;
-  delete data["g-recaptcha-response"];
-  delete data.privacyAccepted;
-
-  const cleaned = {};
-  for (const k of ALLOWED_FIELDS) if (data[k] !== undefined) cleaned[k] = data[k];
-
-  // 6) SMTP
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 465),
-    secure: Number(process.env.SMTP_PORT || 465) === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+function makeTransport() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 465);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) throw new Error("Faltan SMTP_HOST/SMTP_USER/SMTP_PASS");
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465, // 465=SSL, 587=STARTTLS
+    auth: { user, pass },
   });
+}
 
-  try { await transporter.verify(); }
-  catch (e) {
-    console.error("SMTP verify failed:", { code: e.code, msg: e.message });
-    return j(500, false, "SMTP no disponible (verify failed)");
+/* =========================
+   Plantilla HTML
+   ========================= */
+function baseStyles() {
+  return `
+    .wrap{max-width:640px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
+    .hdr{background:#7a0c0c;color:#fff;padding:16px 20px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial}
+    .title{font-size:18px;font-weight:700;margin:0}
+    .body{padding:20px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;color:#111827}
+    .kv{width:100%;border-collapse:collapse;margin:8px 0 16px}
+    .kv th{text-align:left;font-weight:600;color:#374151;padding:6px 0;white-space:nowrap;vertical-align:top;width:220px}
+    .kv td{color:#111827;padding:6px 0}
+    .muted{color:#6b7280}
+    .foot{margin-top:18px;font-size:12px;color:#6b7280}
+    @media (prefers-color-scheme: dark){
+      body{background:#0b0b0b}
+      .wrap{background:#111827;border-color:#374151}
+      .body{color:#e5e7eb}
+      .kv th{color:#9ca3af}
+      .kv td{color:#e5e7eb}
+      .muted{color:#9ca3af}
+      .foot{color:#9ca3af}
+    }
+  `;
+}
+
+function htmlPreafiliacionTable(d) {
+  return `
+    <table class="kv">
+      <tr><th>Fecha</th><td>${safe(new Date(d.fechaISO || nowISO()).toLocaleString("es-MX"))}</td></tr>
+      <tr><th>Nombre(s)</th><td>${safe(d.nombres || "")}</td></tr>
+      <tr><th>Apellido paterno</th><td>${safe(d.apellidoPaterno || "")}</td></tr>
+      <tr><th>Apellido materno</th><td>${safe(d.apellidoMaterno || "")}</td></tr>
+      <tr><th>CURP</th><td>${safe(d.curp || "")}</td></tr>
+      <tr><th>RFC</th><td>${safe(d.rfc || "")}</td></tr>
+      <tr><th>Correo</th><td>${safe(d.correo || "")}</td></tr>
+      <tr><th>Teléfono</th><td>${safe(d.telefono || "")}</td></tr>
+      <tr><th>Unidad de adscripción</th><td>${safe(d.unidad || d.unidadAdscripcion || "")}</td></tr>
+      <tr><th>Institución</th><td>${safe(d.empresa || d.institucion || "")}</td></tr>
+      <tr><th>Domicilio</th><td>${safe(preview(d.domicilio || "", 300))}</td></tr>
+      <tr><th>Municipio</th><td>${safe(d.municipio || "")}</td></tr>
+      <tr><th>Estado</th><td>${safe(d.estado || "")}</td></tr>
+      <tr><th>Aviso de privacidad</th><td>${d.privacyAccepted ? "Aceptado" : "No aceptado"}</td></tr>
+    </table>
+  `;
+}
+
+function buildHtmlEmail({ title, intro, data, footerNote }) {
+  return `<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>${baseStyles()}</style></head>
+<body>
+  <div class="wrap">
+    <div class="hdr"><h1 class="title">${safe(title)}</h1></div>
+    <div class="body">
+      <p>${safe(intro)}</p>
+      ${htmlPreafiliacionTable(data)}
+      <div class="foot">${safe(footerNote || "Este es un aviso automático del sistema SITYPS.")}</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
+/* =========================
+   CSV
+   ========================= */
+function toCSVRow(arr) {
+  return arr.map((v) => {
+    const s = String(v ?? "");
+    if (/[",;\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }).join(",") + "\n";
+}
+function buildCSV(data) {
+  const headers = [
+    "fechaISO","nombres","apellidoPaterno","apellidoMaterno",
+    "curp","rfc","correo","telefono","unidadAdscripcion",
+    "institucion","domicilio","municipio","estado","privacyAccepted"
+  ];
+  const row = [
+    data.fechaISO || nowISO(),
+    data.nombres || "",
+    data.apellidoPaterno || "",
+    data.apellidoMaterno || "",
+    data.curp || "",
+    data.rfc || "",
+    data.correo || "",
+    data.telefono || "",
+    data.unidad || data.unidadAdscripcion || "",
+    data.empresa || data.institucion || "",
+    data.domicilio || "",
+    data.municipio || "",
+    data.estado || "",
+    data.privacyAccepted ? "sí" : "no",
+  ];
+  return toCSVRow(headers) + toCSVRow(row);
+}
+
+/* =========================
+   reCAPTCHA (opcional)
+   ========================= */
+async function verifyCaptcha(token, ip) {
+  const secret = process.env.RECAPTCHA_SECRET;
+  if (!secret) return { ok: true, detail: "No captcha (sin RECAPTCHA_SECRET)" };
+  if (!token) return { ok: false, detail: "Falta token captcha" };
+  try {
+    const form = new URLSearchParams();
+    form.append("secret", secret);
+    form.append("response", token);
+    if (ip) form.append("remoteip", ip);
+    const r = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const j = await r.json();
+    return { ok: !!j.success, detail: j };
+  } catch (e) {
+    // Si falla la verificación por red, no bloqueamos
+    return { ok: true, detail: "captcha skipped (network)" };
+  }
+}
+
+/* =========================
+   Handler
+   ========================= */
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "Method Not Allowed" };
   }
 
-  const to = process.env.TO_ACTAS || CONFIG.emails?.toActas || "actas@sityps.org.mx";
-  const subjectPrefix = process.env.SUBJECT_PREFIX || CONFIG.site?.subjectPrefix || "Preafiliación";
-  const subject = `${subjectPrefix} - ${data.apellidoPaterno} ${data.apellidoMaterno}, ${data.nombres}`;
-
-  const submittedAt = new Date().toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
-  const cuerpo = `Nueva solicitud de preafiliación
-Fecha/hora: ${submittedAt}
-
-${JSON.stringify(cleaned, null, 2)}
-
---
-Este mensaje fue enviado desde sityps.org.mx`;
-
-  // 7) CSV
-  const headersOrder = Array.isArray(CONFIG.csv?.order) && CONFIG.csv.order.length
-    ? CONFIG.csv.order.filter((k) => ALLOWED_FIELDS.includes(k))
-    : ALLOWED_FIELDS;
-
-  const headers = headersOrder.filter((k) => Object.prototype.hasOwnProperty.call(cleaned, k));
-  const csvLine = headers.map((k) => `"${String(cleaned[k] ?? "").replace(/"/g, '""')}"`).join(",");
-  const csv = `${headers.join(",")}\n${csvLine}\n`;
-
-  // 8) Enviar
   try {
-    await transporter.sendMail({
-      from: `SITYPS <${process.env.SMTP_USER}>`,
-      to,
-      cc: process.env.CC || CONFIG.emails?.cc || undefined,
-      subject,
-      text: cuerpo,
-      attachments: [{ filename: "preafiliacion.csv", content: csv, contentType: "text/csv" }],
-    });
-    return j(200, true, "OK");
-  } catch (e) {
-    console.error("Mailer error:", { code: e.code, msg: e.message });
-    return j(500, false, "No se pudo enviar el correo");
+    const body = JSON.parse(event.body || "{}");
+
+    // Campos esperados desde el front
+    const data = {
+      fechaISO: nowISO(),
+      nombres: String(body.nombres || "").trim(),
+      apellidoPaterno: String(body.apellidoPaterno || "").trim(),
+      apellidoMaterno: String(body.apellidoMaterno || "").trim(),
+      curp: String(body.curp || "").trim(),
+      rfc: String(body.rfc || "").trim(),
+      correo: String(body.correo || "").trim(),
+      telefono: String(body.telefono || "").trim(),
+      unidad: String(body.unidad || body.unidadAdscripcion || "").trim(),
+      empresa: String(body.empresa || body.institucion || "").trim(),
+      domicilio: String(body.domicilio || "").trim(),
+      municipio: String(body.municipio || "").trim(),
+      estado: String(body.estado || "").trim(),
+      privacyAccepted: !!body.privacyAccepted,
+      captchaToken: body.captcha || body["g-recaptcha-response"] || body.recaptchaToken || "",
+    };
+
+    // Validaciones mínimas
+    if (!data.nombres) return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Faltan nombres" }) };
+    if (!isEmail(data.correo)) return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Correo inválido" }) };
+    if (!data.privacyAccepted) return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Debes aceptar el aviso de privacidad" }) };
+
+    // Captcha (si está habilitado)
+    const ip = event.headers["x-forwarded-for"] || event.headers["client-ip"] || "";
+    const cap = await verifyCaptcha(data.captchaToken, ip);
+    if (!cap.ok) {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Captcha inválido" }) };
+    }
+
+    // Recipientes: Actas y Acuerdos + fallback + solicitante
+    const recip = [];
+    if (process.env.TO_ACTAS) recip.push(...splitEmails(process.env.TO_ACTAS));
+    if (process.env.TICKETS_TO_DEFAULT) recip.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
+    if (isEmail(data.correo)) recip.push(data.correo);
+    const toList = uniq(recip);
+    if (toList.length === 0) {
+      return { statusCode: 500, body: JSON.stringify({ ok: false, error: "Sin destinatarios (configura TO_ACTAS o TICKETS_TO_DEFAULT)" }) };
+    }
+
+    // CSV
+    const csv = buildCSV(data);
+
+    // Correo
+    let mailOk = false, mailError = "";
+    try {
+      const transport = makeTransport();
+      const pref = process.env.SUBJECT_PREFIX || "SITYPS";
+      const nombreFull = displayName(data.nombres, data.apellidoPaterno, data.apellidoMaterno) || data.correo || "Solicitante";
+      const subject = `${pref} · Preafiliación — ${nombreFull}`;
+
+      const html = buildHtmlEmail({
+        title: "Solicitud de preafiliación",
+        intro: "Hemos recibido tu solicitud. El área de Organización, Actas y Acuerdos iniciará el trámite de afiliación.",
+        data,
+        footerNote: "Si no esperabas este correo, por favor ignóralo.",
+      });
+
+      const text =
+        `Fecha: ${new Date(data.fechaISO).toLocaleString("es-MX")}\n` +
+        `Nombre(s): ${data.nombres}\n` +
+        `Apellidos: ${data.apellidoPaterno} ${data.apellidoMaterno}\n` +
+        `CURP: ${data.curp}\nRFC: ${data.rfc}\n` +
+        `Correo: ${data.correo}\nTeléfono: ${data.telefono}\n` +
+        `Unidad: ${data.unidad}\nInstitución: ${data.empresa}\n` +
+        `Domicilio: ${preview(data.domicilio)}\nMunicipio/Estado: ${data.municipio}/${data.estado}\n` +
+        `Aviso de privacidad: ${data.privacyAccepted ? "Aceptado" : "No aceptado"}\n`;
+
+      await transport.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to: toList.join(", "),
+        subject,
+        text,
+        html,
+        attachments: [
+          {
+            filename: "preafiliacion.csv",
+            content: Buffer.from(csv, "utf8"),
+            contentType: "text/csv",
+          },
+        ],
+      });
+      mailOk = true;
+    } catch (e) {
+      mailError = String(e.message || e);
+    }
+
+    return {
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ok: true, mailOk, ...(mailOk ? {} : { mailError }) }),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ok: false, error: String(err.message || err) }),
+    };
   }
 };

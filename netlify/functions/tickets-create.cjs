@@ -19,6 +19,11 @@ function yyyymmdd(d = new Date()) {
 function random4() { return Math.random().toString(36).slice(2, 6).toUpperCase(); }
 function buildFolio() { return `T-${yyyymmdd()}-${random4()}`; }
 function preview(text, n = 240) { const s = String(text || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
+function safe(x) {
+  return String(x ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
 
 function normalizeFacilidades(fac) {
   if (!fac || typeof fac !== "object") return null;
@@ -103,7 +108,6 @@ function baseStyles() {
     .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
     .muted{color:#6b7280}
     .section{margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb}
-    .changes li{margin:4px 0}
     .foot{margin-top:18px;font-size:12px;color:#6b7280}
     @media (prefers-color-scheme: dark){
       body{background:#0b0b0b}
@@ -116,7 +120,6 @@ function baseStyles() {
     }
   `;
 }
-
 function htmlTicketBlock(ticket) {
   const facil = ticket.facilidades
     ? `
@@ -145,21 +148,7 @@ function htmlTicketBlock(ticket) {
     ${facil}
   `;
 }
-
-function htmlChangesList(cambiosAplicados) {
-  const items = Object.entries(cambiosAplicados || {}).map(
-    ([k, v]) => `<li><strong>${safe(k)}:</strong> ${safe(v)}</li>`
-  ).join("") || "<li>—</li>";
-  return `<ul class="changes">${items}</ul>`;
-}
-
-function safe(x) {
-  return String(x ?? "")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
-}
-
-function buildHtmlEmail({ title, intro, ticket, changesHtml, footerNote }) {
+function buildHtmlEmail({ title, intro, ticket, footerNote }) {
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <style>${baseStyles()}</style></head>
@@ -169,7 +158,6 @@ function buildHtmlEmail({ title, intro, ticket, changesHtml, footerNote }) {
     <div class="body">
       <p>${safe(intro)}</p>
       ${htmlTicketBlock(ticket)}
-      ${changesHtml ? `<div class="section"><div class="muted" style="font-weight:600;margin-bottom:6px">Cambios aplicados</div>${changesHtml}</div>` : ""}
       <div class="foot">${safe(footerNote || "Este es un aviso automático del sistema SITYPS.")}</div>
     </div>
   </div>
@@ -206,7 +194,7 @@ exports.handler = async (event) => {
       if (!facilidades) return { statusCode: 400, body: JSON.stringify({ ok:false, error:"Completa los datos de facilidades" }) };
       if (facilidades.diasSolicitados <= 0) return { statusCode: 400, body: JSON.stringify({ ok:false, error:"Indica el número de días solicitados" }) };
       if (facilidades.diasSolicitados === 1 && !facilidades.fecha) return { statusCode: 400, body: JSON.stringify({ ok:false, error:"Indica la fecha solicitada" }) };
-      if (facilidades.diasSolicitados > 1 && !(facilidades.periodo?.desde && facicilidades.periodo?.hasta)) {
+      if (facilidades.diasSolicitados > 1 && !(facilidades.periodo?.desde && facilidades.periodo?.hasta)) {
         return { statusCode: 400, body: JSON.stringify({ ok:false, error:"Agrega el periodo de fechas" }) };
       }
       if (!facilidades.acuseConfirm) return { statusCode: 400, body: JSON.stringify({ ok:false, error:"Confirma el acuse entregado a RH" }) };
@@ -234,22 +222,11 @@ exports.handler = async (event) => {
     // Correo
     let mailOk = false, mailError = "";
     try {
-      const dest = [];
-      if (process.env.TICKETS_TO_DEFAULT) dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
-      if (isEmail(ticket.correo)) dest.push(ticket.correo);
-      // (Ruteo por módulo solo si algún TO_... está configurado)
-      const modulo = (ticket.moduloDestino || "").toLowerCase();
-      for (const rule of MOD_TO_ENV) {
-        if (rule.match.test(modulo)) {
-          const envVal = process.env[rule.env];
-          if (envVal) dest.push(...splitEmails(envVal));
-          break;
-        }
-      }
-      const toList = uniq(dest);
+      const toList = computeRecipientsOnCreate(ticket);
       if (toList.length > 0) {
         const transport = makeTransport();
-        const subject = `[${process.env.SUBJECT_PREFIX || "SITYPS"}] Ticket ${ticket.folio} recibido`;
+        const pref = process.env.SUBJECT_PREFIX || "SITYPS";
+        const subject = `${pref} · Ticket ${ticket.folio} — ${ticket.nombre} — ${ticket.tipo || "Solicitud"}`;
         const text = 
           `Folio: ${ticket.folio}\nFecha: ${new Date(ticket.submittedAt).toLocaleString("es-MX")}\n` +
           `Módulo: ${ticket.moduloDestino}\nTipo: ${ticket.tipo}\n` +
@@ -263,7 +240,6 @@ exports.handler = async (event) => {
           title: "Ticket recibido",
           intro: "Hemos recibido tu solicitud. Te contactaremos a la brevedad.",
           ticket,
-          changesHtml: "", // no hay cambios en “create”
           footerNote: "Si no esperabas este correo, por favor ignóralo.",
         });
 
