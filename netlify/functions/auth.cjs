@@ -1,98 +1,134 @@
 // netlify/functions/auth.cjs
-const jwt = require("jsonwebtoken");
+// Login Backoffice SITYPS (CommonJS)
 
-const DEFAULT_DOMAIN = process.env.DEFAULT_LOGIN_DOMAIN || "sityps.org.mx";
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const jwt = require('jsonwebtoken');
 
-/** Normaliza correo: si viene "soporte" => "soporte@sityps.org.mx" */
-function normEmail(raw) {
-  const s = String(raw || "").trim().toLowerCase();
-  if (!s) return "";
-  return s.includes("@") ? s : `${s}@${DEFAULT_DOMAIN}`;
+// Utilidades
+const ok = (bodyObj, status = 200) => ({
+  statusCode: status,
+  headers: {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  },
+  body: JSON.stringify(bodyObj),
+});
+
+const err = (message, status = 400) => ok({ ok: false, error: message }, status);
+
+// Normaliza JSON desde variable de entorno (a veces viene con comillas adicionales)
+function parseAdminUsers(envValue) {
+  if (!envValue) return [];
+  let v = envValue.trim();
+  try {
+    // Si por algún motivo viene doblemente serializado, intenta dos veces
+    let parsed = JSON.parse(v);
+    if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
 }
 
-/** Carga usuarios de ADMIN_USERS_JSON; acepta objeto o arreglo */
-function loadUsers() {
-  const raw = process.env.ADMIN_USERS_JSON || "{}";
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = {};
+// Genera email normalizado a partir de usuario o correo
+function normalizeIdentity(raw, defaultDomain = 'sityps.org.mx') {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return { email: '', user: '' };
+  if (s.includes('@')) {
+    const [u, dom] = s.split('@');
+    return { email: `${u}@${dom}`, user: u };
   }
-  /** Formato unificado: [{ email, name, role, puesto, modulo, pass }] */
-  if (Array.isArray(parsed)) {
-    return parsed.map((u) => ({
-      email: (u.email || u.correo || "").toLowerCase(),
-      name: u.name || u.nombre || u.displayName || "",
-      role: u.role || u.rol || "",
-      puesto: u.puesto || "",
-      modulo: u.modulo || u.department || "",
-      pass: u.pass || u.password || "",
-    }));
-  }
-  // objeto { "email": { ... } }
-  return Object.entries(parsed).map(([email, u]) => ({
-    email: email.toLowerCase(),
-    name: u.name || u.nombre || u.displayName || "",
-    role: u.role || u.rol || "",
-    puesto: u.puesto || "",
-    modulo: u.modulo || u.department || "",
-    pass: u.pass || u.password || "",
-  }));
+  return { email: `${s}@${defaultDomain}`, user: s };
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ ok: false, error: "Method Not Allowed" }),
-    };
+  // Preflight
+  if (event.httpMethod === 'OPTIONS') return ok({ ok: true });
+
+  if (event.httpMethod !== 'POST') {
+    return err('Method Not Allowed', 405);
   }
 
-  let body = {};
+  if (!event.body) {
+    return err('Faltan credenciales', 400);
+  }
+
+  let payload = {};
   try {
-    body = JSON.parse(event.body || "{}");
-  } catch (_) {}
-
-  const emailRaw =
-    body.email || body.correo || body.user || body.usuario || body.username || "";
-  const password =
-    body.password || body.pass || body.contrasena || body["contraseña"] || "";
-
-  if (!emailRaw || !password) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ ok: false, message: "Faltan credenciales" }),
-    };
+    payload = JSON.parse(event.body);
+  } catch {
+    return err('JSON inválido', 400);
   }
 
-  const email = normEmail(emailRaw);
-  const users = loadUsers();
-  const u = users.find((x) => x.email === email);
+  // Admite varios nombres de campo
+  const rawId =
+    payload.email ??
+    payload.correo ??
+    payload.user ??
+    payload.usuario ??
+    '';
 
-  if (!u) {
-    return { statusCode: 401, body: JSON.stringify({ ok: false, error: "Usuario no autorizado" }) };
+  const password = payload.password ?? payload.pass ?? payload.contrasena ?? payload.contraseña ?? '';
+
+  if (!rawId || !password) {
+    return err('Faltan credenciales', 400);
   }
 
-  const generic = process.env.ADMIN_PASSWORD || "";
-  const expectedPass = u.pass || generic;
-
-  if (!expectedPass || password !== expectedPass) {
-    return { statusCode: 401, body: JSON.stringify({ ok: false, error: "Contraseña inválida" }) };
+  // Cargar usuarios de entorno
+  const admins = parseAdminUsers(process.env.ADMIN_USERS_JSON);
+  if (!admins.length) {
+    return err('Configuración de usuarios no disponible', 500);
   }
 
-  const payload = {
-    sub: email,
-    name: u.name || email.split("@")[0],
-    role: u.role || "soporte",
-    puesto: u.puesto || "",
-    modulo: u.modulo || "",
-  };
+  // Dominios permitidos (si en un futuro usas otro, agrega aquí)
+  const DEFAULT_DOMAIN = 'sityps.org.mx';
 
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ ok: true, token, user: payload }),
-  };
+  // Normalizar identidad
+  const { email, user } = normalizeIdentity(rawId, DEFAULT_DOMAIN);
+
+  // Buscar usuario: por local-part o por email
+  const found = admins.find((u) => {
+    const local = String(u.user || '').toLowerCase();
+    const fullEmail = (u.email ? String(u.email) : `${local}@${DEFAULT_DOMAIN}`).toLowerCase();
+    return local === user || fullEmail === email;
+  });
+
+  if (!found) {
+    // Usuario no existe
+    return err('Usuario no autorizado', 401);
+  }
+
+  // Validar contraseña
+  const rightPass = String(found.pass || '');
+  if (rightPass !== String(password)) {
+    return err('Usuario o contraseña incorrectos', 401);
+  }
+
+  // Emitir JWT
+  const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+  const token = jwt.sign(
+    {
+      sub: found.user,
+      email: `${found.user}@${DEFAULT_DOMAIN}`,
+      role: found.role,
+      displayName: found.displayName,
+      puesto: found.puesto,
+    },
+    JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+
+  return ok({
+    ok: true,
+    token,
+    user: {
+      user: found.user,
+      email: `${found.user}@${DEFAULT_DOMAIN}`,
+      role: found.role,
+      displayName: found.displayName,
+      puesto: found.puesto,
+    },
+  });
 };
