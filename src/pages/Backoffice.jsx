@@ -18,18 +18,12 @@ function Badge({ok, at}) {
     </div>
   );
 }
-function uniq(xs){ return [...new Set(xs.filter(Boolean))]; }
-function normalizeEstado(v){
-  return String(v||"").toLowerCase().replace(/\s+/g,"_");
-}
-function humanEstado(v){
-  return String(v||"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase());
-}
+function uniq(xs){ return [...new Set((xs||[]).filter(Boolean))]; }
+function normalizeEstado(v){ return String(v||"").toLowerCase().replace(/\s+/g,"_"); }
+function humanEstado(v){ return String(v||"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase()); }
 function csvEscape(x){
   const s = String(x ?? "");
-  if (s.includes('"') || s.includes(",") || s.includes("\n")) {
-    return `"${s.replace(/"/g,'""')}"`;
-  }
+  if (s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replace(/"/g,'""')}"`;
   return s;
 }
 function buildCSV(rows){
@@ -64,6 +58,44 @@ function downloadCSV(filename, text){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
+/* ───────── sort helpers ───────── */
+const PRIORITY_WEIGHT = { "Alta": 3, "Media": 2, "Baja": 1 };
+function cmp(a,b){
+  if (a===b) return 0;
+  if (a===undefined || a===null) return -1;
+  if (b===undefined || b===null) return 1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "es", { sensitivity: "base", numeric: true });
+}
+function getSortVal(t, key){
+  switch(key){
+    case "folio": return t.folio || "";
+    case "submittedAt": return t.submittedAt ? +new Date(t.submittedAt) : 0;
+    case "modulo": return (t.moduloDestino || t.modulo || "");
+    case "tipo": return t.tipo || "";
+    case "solicitante": return t.nombre || "";
+    case "estado": return normalizeEstado(t.estado || "");
+    case "prioridad": return PRIORITY_WEIGHT[t.prioridad] || 0;
+    case "lastMailAt": return t.lastMail?.at ? +new Date(t.lastMail.at) : 0;
+    default: return "";
+  }
+}
+function SortHeader({label, colKey, sortKey, sortDir, onSort, className}){
+  const active = sortKey === colKey;
+  const icon = !active ? "↕" : (sortDir === "asc" ? "▲" : "▼");
+  return (
+    <button
+      type="button"
+      onClick={()=>onSort(colKey)}
+      className={cls("group inline-flex items-center gap-1 font-semibold", className)}
+      title={active ? `Ordenado ${sortDir==="asc"?"ascendente":"descendente"}` : "Ordenar"}
+    >
+      <span>{label}</span>
+      <span className={cls("text-xs opacity-60 group-hover:opacity-100", active && "opacity-100")}>{icon}</span>
+    </button>
+  );
+}
+
 /* ───────── page ───────── */
 export default function Backoffice(){
   const [loading, setLoading] = useState(true);
@@ -73,6 +105,14 @@ export default function Backoffice(){
   // filtros
   const [fEstado, setFEstado] = useState("todos");
   const [fModulo, setFModulo] = useState("todos");
+
+  // orden
+  const [sortKey, setSortKey] = useState("submittedAt");
+  const [sortDir, setSortDir] = useState("desc"); // asc | desc
+
+  // paginación
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // botón reenviar
   const [busyFolio, setBusyFolio] = useState("");
@@ -96,7 +136,6 @@ export default function Backoffice(){
   // opciones únicas de filtros
   const estadosOpts = useMemo(()=>{
     const all = uniq(items.map(t => normalizeEstado(t.estado || ""))).filter(Boolean);
-    // mantener orden común
     const order = ["nuevo","en_proceso","resuelto","cerrado"];
     const inOrder = order.filter(x => all.includes(x));
     const rest = all.filter(x => !inOrder.includes(x)).sort();
@@ -109,10 +148,9 @@ export default function Backoffice(){
   }, [items]);
 
   // rows filtradas
-  const rows = useMemo(()=>{
+  const filtered = useMemo(()=>{
     const term = q.trim().toLowerCase();
     return items.filter(t => {
-      // filtro texto
       if (term) {
         const hay = [t.folio, t.nombre, t.correo, t.moduloDestino || t.modulo, t.tipo, t.estado, t.prioridad]
           .join(" ")
@@ -120,23 +158,43 @@ export default function Backoffice(){
           .includes(term);
         if (!hay) return false;
       }
-      // filtro estado
-      if (fEstado !== "todos") {
-        if (normalizeEstado(t.estado) !== fEstado) return false;
-      }
-      // filtro modulo
-      if (fModulo !== "todos") {
-        if ((t.moduloDestino || t.modulo || "").trim() !== fModulo) return false;
-      }
+      if (fEstado !== "todos" && normalizeEstado(t.estado) !== fEstado) return false;
+      if (fModulo !== "todos" && (t.moduloDestino || t.modulo || "").trim() !== fModulo) return false;
       return true;
     });
   }, [items, q, fEstado, fModulo]);
 
+  // ordenadas
+  const sorted = useMemo(()=>{
+    const arr = filtered.slice();
+    arr.sort((a,b)=>{
+      const va = getSortVal(a, sortKey);
+      const vb = getSortVal(b, sortKey);
+      const r = cmp(va, vb);
+      return sortDir === "asc" ? r : -r;
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  // paginadas
+  const total = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * pageSize;
+  const end = start + pageSize;
+  const rows = sorted.slice(start, end);
+
+  // acciones UI
   const clearFilters = () => { setQ(""); setFEstado("todos"); setFModulo("todos"); };
+  const onSort = (key) => {
+    if (key === sortKey) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir(key==="submittedAt" ? "desc" : "asc"); }
+  };
+  useEffect(()=>{ setPage(1); }, [q, fEstado, fModulo, pageSize]); // reset paginación al filtrar/cambiar tamaño
 
   const exportCSV = () => {
-    if (rows.length === 0) return;
-    const csv = buildCSV(rows);
+    if (sorted.length === 0) return;
+    const csv = buildCSV(sorted); // exporta TODO el filtrado, no solo la página
     downloadCSV(`tickets_${Date.now()}.csv`, csv);
   };
 
@@ -172,7 +230,7 @@ export default function Backoffice(){
         <p className="text-sm text-slate-500">Administra solicitudes y seguimiento.</p>
       </div>
 
-      {/* Controles: búsqueda + filtros + acciones */}
+      {/* Controles: búsqueda + filtros */}
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="sm:col-span-2">
           <label className="block text-xs font-medium text-slate-600">Buscar</label>
@@ -183,7 +241,6 @@ export default function Backoffice(){
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
           />
         </div>
-
         <div>
           <label className="block text-xs font-medium text-slate-600">Estado</label>
           <select
@@ -192,13 +249,10 @@ export default function Backoffice(){
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
           >
             {estadosOpts.map(v=>(
-              <option key={v} value={v}>
-                {v==="todos" ? "Todos" : humanEstado(v)}
-              </option>
+              <option key={v} value={v}>{v==="todos" ? "Todos" : humanEstado(v)}</option>
             ))}
           </select>
         </div>
-
         <div>
           <label className="block text-xs font-medium text-slate-600">Módulo</label>
           <select
@@ -213,11 +267,24 @@ export default function Backoffice(){
         </div>
       </div>
 
-      {/* Acciones sobre listado */}
+      {/* Acciones + paginación superior */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm text-slate-600">
-          {loading ? "Cargando…" : `${rows.length} ticket(s) mostrados`}
+        <div className="flex items-center gap-3 text-sm text-slate-600">
+          <span>{loading ? "Cargando…" : `${total} ticket(s)`}</span>
+          <span className="hidden sm:inline-block text-slate-400">•</span>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-600">Por página</label>
+            <select
+              value={pageSize}
+              onChange={(e)=>setPageSize(Number(e.target.value))}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-rose-300"
+            >
+              {[10,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <span className="text-slate-500">{total === 0 ? "0–0" : `${start+1}–${Math.min(end,total)}`} de {total}</span>
+          </div>
         </div>
+
         <div className="flex items-center gap-2">
           <button
             onClick={clearFilters}
@@ -227,14 +294,42 @@ export default function Backoffice(){
           </button>
           <button
             onClick={exportCSV}
-            disabled={rows.length===0}
+            disabled={sorted.length===0}
             className={cls(
               "inline-flex items-center rounded-md bg-slate-700 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800",
-              rows.length===0 && "opacity-60 cursor-not-allowed"
+              sorted.length===0 && "opacity-60 cursor-not-allowed"
             )}
           >
-            Exportar CSV
+            Exportar CSV (filtrado)
           </button>
+          {/* Paginación */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={()=>setPage(1)}
+              disabled={currentPage<=1}
+              className={cls("rounded-md px-2 py-1 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+              title="Primera página"
+            >«</button>
+            <button
+              onClick={()=>setPage(p=>Math.max(1,p-1))}
+              disabled={currentPage<=1}
+              className={cls("rounded-md px-2 py-1 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+              title="Anterior"
+            >‹</button>
+            <span className="mx-1 text-sm text-slate-600">{currentPage} / {totalPages}</span>
+            <button
+              onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
+              disabled={currentPage>=totalPages}
+              className={cls("rounded-md px-2 py-1 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+              title="Siguiente"
+            >›</button>
+            <button
+              onClick={()=>setPage(totalPages)}
+              disabled={currentPage>=totalPages}
+              className={cls("rounded-md px-2 py-1 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+              title="Última página"
+            >»</button>
+          </div>
         </div>
       </div>
 
@@ -243,14 +338,30 @@ export default function Backoffice(){
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
-              <th className="px-3 py-2 font-semibold">Folio</th>
-              <th className="px-3 py-2 font-semibold">Fecha</th>
-              <th className="px-3 py-2 font-semibold">Módulo</th>
-              <th className="px-3 py-2 font-semibold">Tipo</th>
-              <th className="px-3 py-2 font-semibold">Solicitante</th>
-              <th className="px-3 py-2 font-semibold">Estado</th>
-              <th className="px-3 py-2 font-semibold">Prioridad</th>
-              <th className="px-3 py-2 font-semibold">Último correo</th>
+              <th className="px-3 py-2">
+                <SortHeader label="Folio" colKey="folio" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Fecha" colKey="submittedAt" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Módulo" colKey="modulo" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Tipo" colKey="tipo" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Solicitante" colKey="solicitante" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Estado" colKey="estado" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Prioridad" colKey="prioridad" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
+              <th className="px-3 py-2">
+                <SortHeader label="Último correo" colKey="lastMailAt" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              </th>
               <th className="px-3 py-2 font-semibold text-right">Acciones</th>
             </tr>
           </thead>
@@ -294,6 +405,35 @@ export default function Backoffice(){
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* paginación inferior */}
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+        <button
+          onClick={()=>setPage(1)}
+          disabled={currentPage<=1}
+          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+          title="Primera página"
+        >«</button>
+        <button
+          onClick={()=>setPage(p=>Math.max(1,p-1))}
+          disabled={currentPage<=1}
+          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+          title="Anterior"
+        >‹</button>
+        <span className="mx-1 text-sm text-slate-600">{currentPage} / {totalPages}</span>
+        <button
+          onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
+          disabled={currentPage>=totalPages}
+          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+          title="Siguiente"
+        >›</button>
+        <button
+          onClick={()=>setPage(totalPages)}
+          disabled={currentPage>=totalPages}
+          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
+          title="Última página"
+        >»</button>
       </div>
     </div>
   );
