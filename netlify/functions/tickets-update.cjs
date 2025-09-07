@@ -4,27 +4,28 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
 /* =========================
-   Helpers generales
+   Utils
    ========================= */
 function nowISO() { return new Date().toISOString(); }
 function mapEstado(e) {
   if (!e) return "nuevo";
   const v = String(e).toLowerCase().replace(/\s+/g, "_");
-  if (["nuevo","en_proceso","resuelto","cerrado"].includes(v)) return v;
-  return "nuevo";
+  return ["nuevo", "en_proceso", "resuelto", "cerrado"].includes(v) ? v : "nuevo";
 }
-function toArrayUnique(arr) {
-  return [...new Set((arr || []).map((s) => String(s || "").trim()).filter(Boolean))];
+function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || "").trim()); }
+function uniq(arr) { return [...new Set((arr || []).filter(Boolean))]; }
+function splitEmails(value) {
+  return String(value || "")
+    .split(/[;,]/g)
+    .map((s) => s.trim())
+    .filter(isEmail);
 }
-function isEmail(x) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || "").trim());
-}
-function previewMax(text, n = 240) {
+function preview(text, n = 240) {
   const s = String(text || "");
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-/* Normaliza el ticket a un shape consistente */
+/* Normaliza y mapea ticket */
 function normalizeTicketForSave(t) {
   t.folio = t.folio || t.id || `T-${Date.now()}`;
   t.submittedAt = t.submittedAt || t.fechaISO || nowISO();
@@ -43,8 +44,6 @@ function normalizeTicketForSave(t) {
     : [];
   return t;
 }
-
-/* Mapea a “shape” del front/backoffice */
 function mapToBackofficeShape(t) {
   const facil = t.facilidades
     ? {
@@ -85,7 +84,7 @@ function mapToBackofficeShape(t) {
   };
 }
 
-/* Auth/JWT (opcional) */
+/* Auth (opcional) */
 function readClaims(event) {
   try {
     const auth = event.headers?.authorization || "";
@@ -108,26 +107,23 @@ function canEdit(ticket, claims) {
 }
 
 /* =========================
-   Correo: transporte y destinatarios
+   Correo
    ========================= */
 function makeTransport() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    throw new Error("Faltan SMTP_HOST/SMTP_USER/SMTP_PASS en variables de entorno");
-  }
+  if (!host || !user || !pass) throw new Error("Faltan SMTP_HOST/SMTP_USER/SMTP_PASS");
   return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465, // TLS en 465; STARTTLS en 587
+    secure: port === 465, // 465 = SSL, 587 = STARTTLS
     auth: { user, pass },
   });
 }
 
-/* Mapa de “módulo” -> env var con correo(s) destino */
+/* (Opcional futuro) ruteo por módulo si defines envs por módulo */
 const MOD_TO_ENV = [
   { match: /afiliaci|organizaci|actas|acuerdos/i, env: "TO_AFILIACION" },
   { match: /laborales|asuntos/i, env: "TO_LABORALES" },
@@ -144,23 +140,21 @@ const MOD_TO_ENV = [
   { match: /soporte|t[eé]cnico/i, env: "TO_SOPORTE" },
 ];
 
-function splitEmails(value) {
-  return String(value || "")
-    .split(/[;,]/g)
-    .map((s) => s.trim())
-    .filter(isEmail);
-}
-
-/** Calcula destinatarios a partir del ticket y cambios */
-function computeRecipients(ticket, cambios) {
+/* Destinatarios (mismo criterio que en create + asignadoA si es email) */
+function computeRecipientsOnUpdate(ticket, cambios) {
   const dest = [];
 
-  // 1) AsignadoA si es email
-  if (isEmail(cambios?.asignadoA || ticket?.asignadoA)) {
-    dest.push(cambios?.asignadoA || ticket.asignadoA);
+  // Fallback global (hoy es la vía principal)
+  if (process.env.TICKETS_TO_DEFAULT) {
+    dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
   }
 
-  // 2) Por módulo destino según ENV
+  // Copia al solicitante
+  if (isEmail(ticket.correo)) {
+    dest.push(ticket.correo);
+  }
+
+  // (Opcional) ruteo por módulo si defines ENV
   const modulo = (ticket.moduloDestino || ticket.modulo || "").toLowerCase();
   for (const rule of MOD_TO_ENV) {
     if (rule.match.test(modulo)) {
@@ -170,37 +164,31 @@ function computeRecipients(ticket, cambios) {
     }
   }
 
-  // 3) Fallback global
-  if (process.env.TICKETS_TO_DEFAULT) {
-    dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
-  }
+  // (Opcional) asignadoA si es correo
+  const asignado = cambios?.asignadoA || ticket.asignadoA;
+  if (isEmail(asignado)) dest.push(asignado);
 
-  // 4) CC al solicitante (opcional)
-  if (isEmail(ticket.correo)) {
-    dest.push(ticket.correo);
-  }
-
-  return toArrayUnique(dest);
+  return uniq(dest);
 }
 
-/* Cuerpo de correo */
-function buildMail(ticketBefore, ticketAfter, cambiosAplicados) {
+/* Cuerpo con el mismo estilo que tickets-create */
+function buildMailOnUpdate(ticketAfter, cambiosAplicados) {
   const pref = process.env.SUBJECT_PREFIX || "SITYPS";
-  const asunto = `[${pref}] Ticket ${ticketAfter.folio} actualizado`;
+  const subject = `[${pref}] Ticket ${ticketAfter.folio} actualizado`;
 
   const l1 = `Folio: ${ticketAfter.folio}\n`;
-  const l2 = `Módulo: ${ticketAfter.moduloDestino || ticketAfter.modulo || "—"}\n`;
-  const l3 = `Estado: ${ticketAfter.estado} | Prioridad: ${ticketAfter.prioridad}\n`;
-  const l4 = `Asignado a: ${ticketAfter.asignadoA || "—"}\n`;
+  const l2 = `Fecha: ${new Date(ticketAfter.submittedAt).toLocaleString("es-MX")}\n`;
+  const l3 = `Módulo: ${ticketAfter.moduloDestino || ticketAfter.modulo || "—"}\n`;
+  const l4 = `Tipo: ${ticketAfter.tipo || "—"}\n`;
   const l5 = `Solicitante: ${ticketAfter.nombre || "—"} (${ticketAfter.correo || "—"})\n`;
-  const l6 = `Unidad: ${ticketAfter.unidadAdscripcion || "—"} | Tel: ${ticketAfter.telefono || "—"}\n`;
-  const l7 = `Descripción: ${previewMax(ticketAfter.descripcion || "—")}\n`;
+  const l6 = `Teléfono: ${ticketAfter.telefono || "—"} | Unidad: ${ticketAfter.unidadAdscripcion || "—"}\n`;
+  const l7 = `Descripción: ${preview(ticketAfter.descripcion || "—")}\n`;
 
   let facil = "";
   if (ticketAfter.facilidades) {
     const f = ticketAfter.facilidades;
     facil =
-      `\n[Facilidades]\n` +
+      `\n[Facilidades administrativas]\n` +
       `Institución: ${f.institucion || "—"}\n` +
       `Evento/Incidencia: ${f.tipoEvento || "—"}\n` +
       `Solicitantes: ${f.cantidadSolicitantes || 1}\n` +
@@ -209,18 +197,18 @@ function buildMail(ticketBefore, ticketAfter, cambiosAplicados) {
 
   const cambiosTxt = Object.entries(cambiosAplicados)
     .map(([k, v]) => `- ${k}: ${v}`)
-    .join("\n");
+    .join("\n") || "—";
 
-  const cuerpo =
+  const text =
     `${l1}${l2}${l3}${l4}${l5}${l6}\n${l7}${facil}\n` +
-    `---\nCambios aplicados:\n${cambiosTxt || "—"}\n` +
-    `---\nPanel: Backoffice → Ticket ${ticketAfter.folio}`;
+    `---\nCambios aplicados:\n${cambiosTxt}\n` +
+    `---\nBackoffice: buscar por folio ${ticketAfter.folio}\n`;
 
-  return { subject: asunto, text: cuerpo };
+  return { subject, text };
 }
 
 /* =========================
-   Handler principal
+   Handler
    ========================= */
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST" && event.httpMethod !== "PATCH") {
@@ -238,6 +226,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Faltan cambios" }) };
     }
 
+    // Blobs
     const opts = process.env.BLOBS_STORE_NAME ? { name: process.env.BLOBS_STORE_NAME } : undefined;
     const store = getStore(opts);
 
@@ -246,7 +235,7 @@ exports.handler = async (event) => {
     let ticket = await store.get(keyDirect, { type: "json" });
     let realKey = keyDirect;
 
-    // Fallback por listado
+    // Fallback: buscar por listado si no encontramos el key directo
     if (!ticket) {
       let cursor;
       do {
@@ -275,7 +264,7 @@ exports.handler = async (event) => {
       return { statusCode: 403, body: JSON.stringify({ ok: false, error: "No autorizado" }) };
     }
 
-    // Guardamos cambios y registramos histórico
+    // Aplicar cambios + histórico
     const hist = Array.isArray(ticket.historico) ? ticket.historico : (ticket.historico = []);
     const by = actorFromClaims(claims);
 
@@ -308,22 +297,21 @@ exports.handler = async (event) => {
       const texto = String(cambios.nota || "").trim();
       if (texto) {
         hist.push({ at: nowISO(), by, action: "nota", notes: texto });
-        cambiosAplicados.nota = previewMax(texto, 120);
+        cambiosAplicados.nota = preview(texto, 120);
       }
     }
 
-    // Persistir
+    // Guardar
     await store.set(realKey, JSON.stringify(ticket, null, 2), { contentType: "application/json" });
 
-    // Envío de correo (no bloqueante del éxito general)
+    // Enviar correo (no bloqueante)
     let mailOk = false, mailError = "";
     try {
-      // Solo si hubo cambios relevantes
       if (Object.keys(cambiosAplicados).length > 0) {
-        const transport = makeTransport();
-        const toList = computeRecipients(ticket, cambios);
+        const toList = computeRecipientsOnUpdate(ticket, cambios);
         if (toList.length > 0) {
-          const { subject, text } = buildMail(null, ticket, cambiosAplicados);
+          const { subject, text } = buildMailOnUpdate(ticket, cambiosAplicados);
+          const transport = makeTransport();
           await transport.sendMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
             to: toList.join(", "),
