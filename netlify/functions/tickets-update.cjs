@@ -68,6 +68,23 @@ const MOD_TO_ENV=[
   {match:/soporte|t[eé]cnico/i,env:"TO_SOPORTE"},
 ];
 
+function computeRecipientsOnUpdate(ticket, cambios){
+  const dest=[];
+  if (process.env.TICKETS_TO_DEFAULT) dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
+  if (isEmail(ticket.correo)) dest.push(ticket.correo);
+  const modulo=(ticket.moduloDestino||ticket.modulo||"").toLowerCase();
+  for(const rule of MOD_TO_ENV){
+    if(rule.match.test(modulo)){
+      const envVal = process.env[rule.env];
+      if (envVal) dest.push(...splitEmails(envVal));
+      break;
+    }
+  }
+  const asignado=cambios?.asignadoA || ticket.asignadoA;
+  if (isEmail(asignado)) dest.push(asignado);
+  return uniq(dest);
+}
+
 /* ===== Plantilla HTML ===== */
 function baseStyles(){ return `
   .wrap{max-width:640px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
@@ -82,15 +99,7 @@ function baseStyles(){ return `
   .section{margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb}
   .changes li{margin:4px 0}
   .foot{margin-top:18px;font-size:12px;color:#6b7280}
-  @media (prefers-color-scheme: dark){
-    body{background:#0b0b0b}
-    .wrap{background:#111827;border-color:#374151}
-    .body{color:#e5e7eb}
-    .kv th{color:#9ca3af}
-    .kv td{color:#e5e7eb}
-    .muted{color:#9ca3af}
-    .foot{color:#9ca3af}
-  }`; }
+`; }
 function htmlTicketBlock(t){
   const facil = t.facilidades ? `
     <div class="section">
@@ -188,19 +197,30 @@ exports.handler = async (event) => {
     ticket = normalizeTicketForSave(ticket);
 
     // Permisos (si usas JWT; si no, edita igual)
-    const claims = readClaims(event);
-    if (!canEdit(ticket, claims))
+    const claims = (function(){
+      try{
+        const auth = event.headers?.authorization || "";
+        const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        if(!token || !process.env.JWT_SECRET) return {};
+        return jwt.verify(token, process.env.JWT_SECRET) || {};
+      }catch{ return {}; }
+    })();
+    const actor = claims.name || claims.nombre || claims.email || "backoffice";
+    const role = String((claims.role||claims.rol||"")).toLowerCase();
+    const moduloUsuario = (claims.dept||claims.modulo||claims.puesto||"").toLowerCase();
+    const modTicket = (ticket.moduloDestino||ticket.modulo||"").toLowerCase();
+    const allowed = (role==="admin"||role==="soporte") || (moduloUsuario && modTicket.includes(moduloUsuario));
+    if (!allowed)
       return { statusCode:403, body:JSON.stringify({ok:false, error:"No autorizado"}) };
 
     const hist = Array.isArray(ticket.historico) ? ticket.historico : (ticket.historico = []);
-    const by = actorFromClaims(claims);
-
     const cambiosAplicados = {};
+
     if ("estado" in cambios && cambios.estado) {
       const prev = ticket.estado;
       ticket.estado = mapEstado(cambios.estado);
       if (ticket.estado !== prev) {
-        hist.push({ at: nowISO(), by, action: "estado", value: ticket.estado });
+        hist.push({ at: nowISO(), by: actor, action: "estado", value: ticket.estado });
         cambiosAplicados.estado = `${ucFirst(prev)} → ${ucFirst(ticket.estado)}`;
       }
     }
@@ -208,7 +228,7 @@ exports.handler = async (event) => {
       const prev = ticket.prioridad;
       ticket.prioridad = String(cambios.prioridad);
       if (ticket.prioridad !== prev) {
-        hist.push({ at: nowISO(), by, action: "prioridad", value: ticket.prioridad });
+        hist.push({ at: nowISO(), by: actor, action: "prioridad", value: ticket.prioridad });
         cambiosAplicados.prioridad = `${prev} → ${ticket.prioridad}`;
       }
     }
@@ -216,25 +236,40 @@ exports.handler = async (event) => {
       const prev = ticket.asignadoA || "—";
       ticket.asignadoA = String(cambios.asignadoA || "");
       if (ticket.asignadoA !== prev) {
-        hist.push({ at: nowISO(), by, action: "asignacion", value: ticket.asignadoA });
+        hist.push({ at: nowISO(), by: actor, action: "asignacion", value: ticket.asignadoA });
         cambiosAplicados.asignacion = `${prev} → ${ticket.asignadoA || "—"}`;
       }
     }
     if (cambios.nota) {
       const texto = String(cambios.nota || "").trim();
       if (texto) {
-        hist.push({ at: nowISO(), by, action: "nota", notes: texto });
+        hist.push({ at: nowISO(), by: actor, action: "nota", notes: texto });
         cambiosAplicados.nota = preview(texto, 120);
       }
     }
 
     await store.set(realKey, JSON.stringify(ticket, null, 2), { contentType: "application/json" });
 
-    // Correo (no bloqueante)
+    // Correo (si hay cambios)
     let mailOk=false, mailError="";
     try{
       if (Object.keys(cambiosAplicados).length > 0) {
-        const toList = computeRecipientsOnUpdate(ticket, cambios);
+        const toList = (function computeRecipientsOnUpdate(){
+          const dest=[];
+          if (process.env.TICKETS_TO_DEFAULT) dest.push(...splitEmails(process.env.TICKETS_TO_DEFAULT));
+          if (isEmail(ticket.correo)) dest.push(ticket.correo);
+          for(const rule of MOD_TO_ENV){
+            if(rule.match.test(modTicket)){
+              const envVal = process.env[rule.env];
+              if (envVal) dest.push(...splitEmails(envVal));
+              break;
+            }
+          }
+          const asignado=cambios?.asignadoA || ticket.asignadoA;
+          if (isEmail(asignado)) dest.push(asignado);
+          return uniq(dest);
+        })();
+
         if (toList.length > 0) {
           const transport = makeTransport();
           const pref = process.env.SUBJECT_PREFIX || "SITYPS";
@@ -250,16 +285,13 @@ exports.handler = async (event) => {
             `Desc: ${preview(ticket.descripcion)}\n\n` +
             `Cambios:\n${Object.entries(cambiosAplicados).map(([k,v])=>`- ${k}: ${v}`).join("\n") || "—"}\n`;
 
-          const html = buildHtmlEmail({
-            title: "Ticket actualizado",
-            intro: "Se registraron cambios en tu ticket.",
-            ticket,
-            changesHtml: (function(c){ 
-              const items = Object.entries(c||{}).map(([k,v])=>`<li><strong>${safe(k)}:</strong> ${safe(v)}</li>`).join("") || "<li>—</li>";
-              return `<ul class="changes">${items}</ul>`;
-            })(cambiosAplicados),
-            footerNote: "Puedes dar seguimiento desde el backoffice.",
-          });
+          const html =
+            `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">`+
+            `<style>${baseStyles()}</style></head><body>`+
+            `<div class="wrap"><div class="hdr"><h1 class="title">Ticket actualizado</h1></div><div class="body">`+
+            `<p>Se registraron cambios en tu ticket.</p>${htmlTicketBlock(ticket)}`+
+            `<div class="section"><div class="muted" style="font-weight:600;margin-bottom:6px">Cambios aplicados</div>${htmlChangesList(cambiosAplicados)}</div>`+
+            `<div class="foot">Este es un aviso automático del sistema SITYPS.</div></div></div></body></html>`;
 
           await transport.sendMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -267,8 +299,11 @@ exports.handler = async (event) => {
             subject, text, html
           });
           mailOk=true;
+
+          ticket.lastMail = { ok: true, at: nowISO(), subject, to: toList };
+          await store.set(realKey, JSON.stringify(ticket, null, 2), { contentType: "application/json" });
         } else {
-          mailError="Sin destinatarios (revisa TICKETS_TO_DEFAULT o correos por módulo)";
+          mailError="Sin destinatarios";
         }
       }
     }catch(e){ mailError=String(e.message||e); }

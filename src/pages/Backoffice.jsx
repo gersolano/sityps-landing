@@ -1,433 +1,151 @@
-import React, { useEffect, useState } from "react";
-import {
-  getToken,
-  clearSession,
-  listTickets,
-  getTicket,
-  updateTicket,
-  getCurrentUser,
-} from "../shared/api";
+import { useEffect, useMemo, useState } from "react";
 
-const ESTADOS = ["nuevo", "en_proceso", "resuelto", "cerrado"];
-
-export default function Backoffice() {
-  const account = getCurrentUser();
-
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    search: "",
-    modulo: "",
-    tipo: "",
-    estado: "",
-  });
-  const [rows, setRows] = useState([]);
-  const [sel, setSel] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!getToken()) {
-      window.location.hash = "#/admin";
-      return;
-    }
-    (async () => {
-      try {
-        await refresh();
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  async function refresh() {
-    const res = await listTickets(filters);
-    setRows(res.tickets || []);
-  }
-
-  async function onRowClick(folio) {
-    const r = await getTicket(folio);
-    setSel(r.ticket || null);
-  }
-
-  async function onSavePatch() {
-    if (!sel?.folio) return;
-    setSaving(true);
-    try {
-      const patch = {
-        estado: sel.estado,
-        prioridad: sel.prioridad,
-        asignadoA: sel.asignadoA || "",
-        notas: sel.notas || "",
-      };
-      const r = await updateTicket(sel.folio, patch);
-      setSel(r.ticket);
-      await refresh();
-    } catch {
-      alert("No se pudo guardar cambios");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (loading) return <div className="px-4 py-6">Cargando…</div>;
-
+function cls(...xs){ return xs.filter(Boolean).join(" "); }
+function fmt(dt){
+  if(!dt) return "—";
+  try { return new Date(dt).toLocaleString("es-MX"); } catch { return String(dt); }
+}
+function Badge({ok, at}) {
+  const color = ok ? "bg-green-100 text-green-800 ring-green-200" : "bg-red-100 text-red-800 ring-red-200";
+  const label = ok ? "Enviado" : "Falló";
   return (
-    <div className="mx-auto max-w-6xl px-4">
-      {/* Encabezado: badge izquierda, título centrado, usuario/Salir a la derecha */}
-      <div className="mt-4 mb-3 grid grid-cols-1 md:grid-cols-3 items-center">
-        <div className="flex justify-center md:justify-start">
-          <RoleBadge role={account?.role} />
-        </div>
-
-        <h1 className="text-2xl font-semibold text-slate-800 text-center">
-          Backoffice — Tickets
-        </h1>
-
-        <div className="mt-3 md:mt-0 flex items-center justify-center md:justify-end gap-3">
-          <div className="text-right leading-tight">
-            <div className="text-sm font-medium text-slate-800">
-              {account?.displayName || account?.user || "Usuario"}
-            </div>
-            <div className="text-xs text-slate-500">
-              {account?.puesto || account?.role || ""}
-            </div>
-          </div>
-          <div className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-700">
-            {(account?.displayName || account?.user || "U").slice(0, 1).toUpperCase()}
-          </div>
-          <button
-            onClick={() => {
-              clearSession();
-              window.location.hash = "#/admin";
-            }}
-            className="rounded-lg border px-3 py-2 text-sm"
-          >
-            Salir
-          </button>
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="grid md:grid-cols-5 gap-3 mb-4">
-        <input
-          placeholder="Buscar (folio, nombre, correo)"
-          className="rounded-lg border px-3 py-2 text-sm"
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-        />
-        <input
-          placeholder="Módulo (afiliacion, demandas, ...)"
-          className="rounded-lg border px-3 py-2 text-sm"
-          value={filters.modulo}
-          onChange={(e) => setFilters((f) => ({ ...f, modulo: e.target.value }))}
-        />
-        <input
-          placeholder="Tipo ID (conflicto-laboral, facilidades…)"
-          className="rounded-lg border px-3 py-2 text-sm"
-          value={filters.tipo}
-          onChange={(e) => setFilters((f) => ({ ...f, tipo: e.target.value }))}
-        />
-        <select
-          className="rounded-lg border px-3 py-2 text-sm"
-          value={filters.estado}
-          onChange={(e) => setFilters((f) => ({ ...f, estado: e.target.value }))}
-        >
-          <option value="">Estado (todos)</option>
-          {ESTADOS.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={refresh}
-          className="rounded-lg bg-slate-900 text-white px-3 py-2 text-sm"
-        >
-          Aplicar
-        </button>
-      </div>
-
-      {/* Tabla */}
-      <div className="overflow-x-auto border rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-100 text-slate-700">
-            <tr>
-              <th className="text-left px-3 py-2">Folio</th>
-              <th className="text-left px-3 py-2">Fecha</th>
-              <th className="text-left px-3 py-2">Módulo</th>
-              <th className="text-left px-3 py-2">Tipo</th>
-              <th className="text-left px-3 py-2">Nombre</th>
-              <th className="text-left px-3 py-2">Prioridad</th>
-              <th className="text-left px-3 py-2">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr
-                key={r.folio}
-                className="border-t hover:bg-slate-50"
-              >
-                <td className="px-3 py-2">
-                  <a className="text-sky-700 underline" href={`#/backoffice/ticket/${r.folio}`}>
-                    {r.folio}
-                  </a>
-                </td>
-                <td className="px-3 py-2">
-                  {new Date(r.submittedAt).toLocaleString("es-MX", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
-                </td>
-
-                {/* Badge de módulo */}
-                <td className="px-3 py-2">
-                  <ModuleBadge modulo={r.moduloDestino} />
-                </td>
-
-                <td className="px-3 py-2">{r.tipo}</td>
-                <td className="px-3 py-2">{r.nombre}</td>
-                <td className="px-3 py-2">{r.prioridad}</td>
-                <td className="px-3 py-2">{r.estado}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
-                  Sin resultados
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Detalle lateral (opcional, al hacer clic en una fila) */}
-      {sel && (
-        <div className="mt-6 grid md:grid-cols-2 gap-4">
-          <div className="rounded-xl border p-4">
-            <h2 className="text-lg font-medium text-slate-800 mb-2">
-              Ticket {sel.folio}
-            </h2>
-            <div className="text-sm text-slate-700 space-y-1">
-              <div>
-                <b>Fecha:</b>{" "}
-                {new Date(sel.submittedAt).toLocaleString("es-MX", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}
-              </div>
-              <div>
-                <b>Módulo:</b> <ModuleBadge modulo={sel.moduloDestino} />
-              </div>
-              <div>
-                <b>Tipo:</b> {sel.tipo}
-              </div>
-              <div>
-                <b>Nombre:</b> {sel.nombre}
-              </div>
-              <div>
-                <b>Correo:</b> {sel.correo}
-              </div>
-              <div>
-                <b>Teléfono:</b> {sel.telefono}
-              </div>
-              <div>
-                <b>Unidad:</b> {sel.unidadAdscripcion}
-              </div>
-              {sel.curp && (
-                <div>
-                  <b>CURP:</b> {sel.curp}
-                </div>
-              )}
-              {sel.rfc && (
-                <div>
-                  <b>RFC:</b> {sel.rfc}
-                </div>
-              )}
-              <div className="mt-2">
-                <b>Descripción:</b>
-                <br />
-                {sel.descripcion}
-              </div>
-
-              {sel.facilidades && (
-                <div className="mt-3 rounded-lg bg-primary-50/50 border border-primary-100 p-3">
-                  <div className="font-medium">Facilidades Administrativas</div>
-                  <div className="text-xs mt-1">
-                    <div>
-                      <b>Cantidad solicitantes:</b>{" "}
-                      {sel.facilidades.cantidadSolicitantes}
-                    </div>
-                    <div>
-                      <b>Fechas solicitadas:</b>{" "}
-                      {sel.facilidades.fechasSolicitadas}
-                    </div>
-                    <div>
-                      <b>Tipo de evento/incidencia:</b>{" "}
-                      {sel.facilidades.tipoEvento}
-                    </div>
-                    <div>
-                      <b>Institución:</b> {sel.facilidades.institucion}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-xl border p-4">
-            <h3 className="text-lg font-medium mb-2">Gestión</h3>
-            <div className="grid gap-3">
-              <div>
-                <label className="text-xs text-slate-600">Estado</label>
-                <select
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  value={sel.estado}
-                  onChange={(e) => setSel((s) => ({ ...s, estado: e.target.value }))}
-                >
-                  {ESTADOS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">Prioridad</label>
-                <select
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  value={sel.prioridad}
-                  onChange={(e) =>
-                    setSel((s) => ({ ...s, prioridad: e.target.value }))
-                  }
-                >
-                  <option>Alta</option>
-                  <option>Media</option>
-                  <option>Baja</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">Asignado a</label>
-                <input
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  value={sel.asignadoA || ""}
-                  onChange={(e) =>
-                    setSel((s) => ({ ...s, asignadoA: e.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">Notas</label>
-                <textarea
-                  rows={5}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  value={sel.notas || ""}
-                  onChange={(e) => setSel((s) => ({ ...s, notas: e.target.value }))}
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  disabled={saving}
-                  onClick={onSavePatch}
-                  className="rounded-lg bg-primary-600 text-white px-4 py-2 text-sm hover:bg-primary-700 disabled:opacity-50"
-                >
-                  {saving ? "Guardando…" : "Guardar cambios"}
-                </button>
-                <button
-                  onClick={() => setSel(null)}
-                  className="rounded-lg border px-4 py-2 text-sm"
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-
-            <h4 className="mt-5 font-medium">Histórico</h4>
-            <div className="mt-2 text-xs text-slate-600 space-y-1 max-h-40 overflow-auto">
-              {(sel.historico || [])
-                .slice()
-                .reverse()
-                .map((h, i) => (
-                  <div key={i}>
-                    • {new Date(h.at).toLocaleString("es-MX")} — {h.by}: {h.action}{" "}
-                    {h.notes ? `(${h.notes})` : ""}
-                  </div>
-                ))}
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="flex items-start gap-2">
+      <span className={cls("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", color)}>
+        {label}
+      </span>
+      <span className="text-[11px] leading-5 text-slate-500">{fmt(at)}</span>
     </div>
   );
 }
 
-/* Badge por rol (izquierda del título) */
-function RoleBadge({ role }) {
-  const meta = roleMeta(role);
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.classes}`}
-      title={meta.title}
-    >
-      {meta.label}
-    </span>
-  );
-}
+export default function Backoffice(){
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState([]);
+  const [q, setQ] = useState("");
+  const [busyFolio, setBusyFolio] = useState("");
 
-function roleMeta(role) {
-  const r = String(role || "").toLowerCase().trim();
-  const map = {
-    admin: { label: "Admin", title: "Administrador", classes: "bg-slate-100 text-slate-800 border-slate-200" },
-    afiliacion: { label: "Afiliación", title: "Secretaría de Organización, Actas y Acuerdos", classes: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-    demandas: { label: "Asuntos Laborales", title: "Secretaría de Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
-    laborales: { label: "Asuntos Laborales", title: "Secretaría de Asuntos Laborales", classes: "bg-rose-100 text-rose-800 border-rose-200" },
-    finanzas: { label: "Finanzas", title: "Secretaría de Finanzas", classes: "bg-amber-100 text-amber-800 border-amber-200" },
-    formacion: { label: "Formación", title: "Secretaría de Formación", classes: "bg-sky-100 text-sky-800 border-sky-200" },
-    escalafon: { label: "Escalafón", title: "Secretaría de Escalafón", classes: "bg-indigo-100 text-indigo-800 border-indigo-200" },
-    prestaciones: { label: "Prestaciones", title: "Créditos, Vivienda y Prestaciones", classes: "bg-teal-100 text-teal-800 border-teal-200" },
-    prensa: { label: "Prensa", title: "Relaciones, Prensa y Propaganda", classes: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" },
-    cultura: { label: "Cultura/Deporte", title: "Fomento Cultural y Deportivo", classes: "bg-purple-100 text-purple-800 border-purple-200" },
-    "deporte-cultura": { label: "Deporte/Cultura", title: "Fomento Cultural y Deportivo", classes: "bg-violet-100 text-violet-800 border-violet-200" },
-    equidad: { label: "Mujer y Equidad", title: "La Mujer y Equidad de Género", classes: "bg-pink-100 text-pink-800 border-pink-200" },
-    "honor-justicia": { label: "Honor y Justicia", title: "Comité de Honor y Justicia", classes: "bg-gray-100 text-gray-800 border-gray-200" },
-    electoral: { label: "Electoral", title: "Comité Electoral", classes: "bg-orange-100 text-orange-800 border-orange-200" },
-    consultorios: { label: "Consultorios", title: "Consultorios/Convenios", classes: "bg-lime-100 text-lime-800 border-lime-200" },
-    soporte: { label: "Soporte", title: "Soporte Técnico", classes: "bg-zinc-100 text-zinc-800 border-zinc-200" },
-    "region-tuxtepec": { label: "Región Tuxtepec", title: "Representante Regional Tuxtepec", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
-    "region-pochutla": { label: "Región Pochutla", title: "Representante Regional Pochutla", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
-    "region-valle-centrales": { label: "Valles Centrales", title: "Representante Regional Valles Centrales", classes: "bg-cyan-100 text-cyan-800 border-cyan-200" },
+  const load = async () => {
+    setLoading(true);
+    try{
+      const r = await fetch("/.netlify/functions/tickets-list");
+      const j = await r.json();
+      if(j?.ok && Array.isArray(j.items)) setItems(j.items);
+      else setItems([]);
+    }catch{
+      setItems([]);
+    }finally{
+      setLoading(false);
+    }
   };
-  return map[r] || { label: r || "Rol", title: r || "Rol", classes: "bg-slate-100 text-slate-800 border-slate-200" };
-}
 
-/* Badge de módulo (tabla y detalle) */
-function ModuleBadge({ modulo }) {
-  const meta = moduleMeta(modulo);
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.classes}`}>
-      {meta.label}
-    </span>
-  );
-}
+  useEffect(()=>{ load(); }, []);
 
-function moduleMeta(mod) {
-  const m = String(mod || "").toLowerCase().trim();
-  const map = {
-    afiliacion: { label: "Afiliación", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    demandas: { label: "Asuntos Laborales", classes: "bg-rose-50 text-rose-700 border-rose-200" },
-    finanzas: { label: "Finanzas", classes: "bg-amber-50 text-amber-700 border-amber-200" },
-    formacion: { label: "Formación", classes: "bg-sky-50 text-sky-700 border-sky-200" },
-    escalafon: { label: "Escalafón", classes: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-    prestaciones: { label: "Prestaciones", classes: "bg-teal-50 text-teal-700 border-teal-200" },
-    prensa: { label: "Prensa", classes: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200" },
-    cultura: { label: "Cultura/Deporte", classes: "bg-purple-50 text-purple-700 border-purple-200" },
-    equidad: { label: "Mujer y Equidad", classes: "bg-pink-50 text-pink-700 border-pink-200" },
-    "honor-justicia": { label: "Honor y Justicia", classes: "bg-gray-50 text-gray-700 border-gray-200" },
-    electoral: { label: "Electoral", classes: "bg-orange-50 text-orange-700 border-orange-200" },
-    consultorios: { label: "Consultorios", classes: "bg-lime-50 text-lime-700 border-lime-200" },
-    soporte: { label: "Soporte", classes: "bg-zinc-50 text-zinc-700 border-zinc-200" },
-    "region-tuxtepec": { label: "Región Tuxtepec", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
-    "region-pochutla": { label: "Región Pochutla", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
-    "region-valle-centrales": { label: "Valles Centrales", classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+  const rows = useMemo(()=>{
+    const term = q.trim().toLowerCase();
+    if(!term) return items;
+    return items.filter(t =>
+      [t.folio, t.nombre, t.correo, t.moduloDestino || t.modulo, t.tipo, t.estado, t.prioridad]
+        .join(" ").toLowerCase().includes(term)
+    );
+  }, [items, q]);
+
+  const resend = async (folio) => {
+    setBusyFolio(folio);
+    try{
+      const r = await fetch("/.netlify/functions/tickets-notify", {
+        method: "POST",
+        headers: { "content-type":"application/json" },
+        body: JSON.stringify({ folio, reason: "Reenvío manual desde backoffice" }),
+      });
+      const j = await r.json();
+      if(j?.ok){
+        await load();
+        alert(`Notificación reenviada para ${folio}.`);
+      }else{
+        alert(`No se pudo reenviar: ${j?.error || "Error desconocido"}`);
+      }
+    }catch(e){
+      alert(`No se pudo reenviar: ${e.message || e}`);
+    }finally{
+      setBusyFolio("");
+    }
   };
-  return map[m] || { label: mod || "Módulo", classes: "bg-slate-50 text-slate-700 border-slate-200" };
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-[220px]">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-800 text-center sm:text-left">
+            Backoffice — Tickets
+          </h1>
+        </div>
+        <div className="w-full sm:w-72">
+          <label className="block text-xs font-medium text-slate-600">Buscar</label>
+          <input
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder="Folio, nombre, correo, módulo, estado…"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-700">
+            <tr>
+              <th className="px-3 py-2 font-semibold">Folio</th>
+              <th className="px-3 py-2 font-semibold">Fecha</th>
+              <th className="px-3 py-2 font-semibold">Módulo</th>
+              <th className="px-3 py-2 font-semibold">Tipo</th>
+              <th className="px-3 py-2 font-semibold">Solicitante</th>
+              <th className="px-3 py-2 font-semibold">Estado</th>
+              <th className="px-3 py-2 font-semibold">Prioridad</th>
+              <th className="px-3 py-2 font-semibold">Último correo</th>
+              <th className="px-3 py-2 font-semibold text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">Cargando…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">Sin tickets</td></tr>
+            ) : rows.map((t)=>(
+              <tr key={t.folio} className="border-t border-slate-100">
+                <td className="px-3 py-2 font-medium text-slate-800">{t.folio}</td>
+                <td className="px-3 py-2">{fmt(t.submittedAt)}</td>
+                <td className="px-3 py-2">{t.moduloDestino || t.modulo || "—"}</td>
+                <td className="px-3 py-2">{t.tipo || "—"}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-col">
+                    <span className="text-slate-800">{t.nombre || "—"}</span>
+                    <span className="text-xs text-slate-500">{t.correo || "—"}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-2">{(t.estado||"").replace(/_/g," ") || "—"}</td>
+                <td className="px-3 py-2">{t.prioridad || "—"}</td>
+                <td className="px-3 py-2">
+                  {t.lastMail ? <Badge ok={!!t.lastMail.ok} at={t.lastMail.at || t.lastMailAt} /> : <span className="text-slate-400">—</span>}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex justify-end">
+                    <button
+                      onClick={()=>resend(t.folio)}
+                      disabled={busyFolio === t.folio}
+                      className={cls(
+                        "inline-flex items-center rounded-md bg-rose-600 px-3 py-1.5 text-white text-sm font-medium shadow-sm hover:bg-rose-700",
+                        busyFolio===t.folio && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      {busyFolio===t.folio ? "Reenviando…" : "Reenviar correo"}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }

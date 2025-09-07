@@ -2,7 +2,7 @@
 const { getStore } = require("@netlify/blobs");
 const nodemailer = require("nodemailer");
 
-/* ============ Utils ============ */
+/* ===== Utils ===== */
 function nowISO() { return new Date().toISOString(); }
 function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || "").trim()); }
 function splitEmails(value) {
@@ -54,7 +54,7 @@ function normalizeFacilidades(fac) {
   };
 }
 
-/* ============ Correo ============ */
+/* ===== Correo ===== */
 function makeTransport() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 465);
@@ -95,7 +95,7 @@ function computeRecipientsOnCreate(ticket) {
   return uniq(dest);
 }
 
-/* ============ Plantilla HTML ============ */
+/* ===== Plantilla correo ===== */
 function baseStyles() {
   return `
     .wrap{max-width:640px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
@@ -164,7 +164,7 @@ function buildHtmlEmail({ title, intro, ticket, footerNote }) {
 </body></html>`;
 }
 
-/* ============ Handler ============ */
+/* ===== Handler ===== */
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
@@ -227,7 +227,7 @@ exports.handler = async (event) => {
         const transport = makeTransport();
         const pref = process.env.SUBJECT_PREFIX || "SITYPS";
         const subject = `${pref} · Ticket ${ticket.folio} — ${ticket.nombre} — ${ticket.tipo || "Solicitud"}`;
-        const text = 
+        const text =
           `Folio: ${ticket.folio}\nFecha: ${new Date(ticket.submittedAt).toLocaleString("es-MX")}\n` +
           `Módulo: ${ticket.moduloDestino}\nTipo: ${ticket.tipo}\n` +
           `Solicitante: ${ticket.nombre} <${ticket.correo}>\nUnidad: ${ticket.unidadAdscripcion}\n` +
@@ -258,6 +258,10 @@ exports.handler = async (event) => {
       mailError = String(e.message || e);
     }
 
+    // Persistir último correo
+    ticket.lastMail = { ok: mailOk, at: nowISO(), subject: (mailOk ? `${process.env.SUBJECT_PREFIX || "SITYPS"} · Ticket ${ticket.folio} — ${ticket.nombre} — ${ticket.tipo || "Solicitud"}` : undefined) };
+    await store.set(`tickets/${folio}.json`, JSON.stringify(ticket, null, 2), { contentType: "application/json" });
+
     return {
       statusCode: 200,
       headers: { "content-type": "application/json" },
@@ -267,7 +271,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ok:false, error:String(err.message || err) }),
+      body: JSON.stringify({ ok:false, error:String(err.message||err) }),
     };
   }
 };
