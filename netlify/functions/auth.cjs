@@ -1,60 +1,98 @@
 // netlify/functions/auth.cjs
 const jwt = require("jsonwebtoken");
 
-function j(code, ok, message, extra = {}) {
-  return {
-    statusCode: code,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-    body: JSON.stringify({ ok, message, ...extra }),
-  };
+const DEFAULT_DOMAIN = process.env.DEFAULT_LOGIN_DOMAIN || "sityps.org.mx";
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+
+/** Normaliza correo: si viene "soporte" => "soporte@sityps.org.mx" */
+function normEmail(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) return "";
+  return s.includes("@") ? s : `${s}@${DEFAULT_DOMAIN}`;
 }
 
+/** Carga usuarios de ADMIN_USERS_JSON; acepta objeto o arreglo */
 function loadUsers() {
-  const json = process.env.ADMIN_USERS_JSON;
-  if (json) {
-    try {
-      const arr = JSON.parse(json);
-      if (Array.isArray(arr) && arr.length) return arr;
-    } catch {}
+  const raw = process.env.ADMIN_USERS_JSON || "{}";
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = {};
   }
-  const u = process.env.ADMIN_USER;
-  const p = process.env.ADMIN_PASS;
-  const r = process.env.ADMIN_ROLE || "admin";
-  const n = process.env.ADMIN_DISPLAY_NAME || u || "Usuario";
-  const puesto = process.env.ADMIN_PUESTO || r;
-
-  return (u && p)
-    ? [{ user: u, pass: p, role: r, displayName: n, puesto }]
-    : [];
+  /** Formato unificado: [{ email, name, role, puesto, modulo, pass }] */
+  if (Array.isArray(parsed)) {
+    return parsed.map((u) => ({
+      email: (u.email || u.correo || "").toLowerCase(),
+      name: u.name || u.nombre || u.displayName || "",
+      role: u.role || u.rol || "",
+      puesto: u.puesto || "",
+      modulo: u.modulo || u.department || "",
+      pass: u.pass || u.password || "",
+    }));
+  }
+  // objeto { "email": { ... } }
+  return Object.entries(parsed).map(([email, u]) => ({
+    email: email.toLowerCase(),
+    name: u.name || u.nombre || u.displayName || "",
+    role: u.role || u.rol || "",
+    puesto: u.puesto || "",
+    modulo: u.modulo || u.department || "",
+    pass: u.pass || u.password || "",
+  }));
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return j(405, false, "Method Not Allowed");
-  if (!process.env.JWT_SECRET) return j(500, false, "JWT no configurado");
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({ ok: false, error: "Method Not Allowed" }),
+    };
+  }
 
   let body = {};
-  try { body = JSON.parse(event.body || "{}"); } catch {}
-  const { user = "", pass = "" } = body;
-  if (!user || !pass) return j(400, false, "Faltan credenciales");
+  try {
+    body = JSON.parse(event.body || "{}");
+  } catch (_) {}
 
+  const emailRaw =
+    body.email || body.correo || body.user || body.usuario || body.username || "";
+  const password =
+    body.password || body.pass || body.contrasena || body["contraseña"] || "";
+
+  if (!emailRaw || !password) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ ok: false, message: "Faltan credenciales" }),
+    };
+  }
+
+  const email = normEmail(emailRaw);
   const users = loadUsers();
-  const found = users.find(u => u.user === user && u.pass === pass);
-  if (!found) return j(401, false, "Credenciales inválidas");
+  const u = users.find((x) => x.email === email);
+
+  if (!u) {
+    return { statusCode: 401, body: JSON.stringify({ ok: false, error: "Usuario no autorizado" }) };
+  }
+
+  const generic = process.env.ADMIN_PASSWORD || "";
+  const expectedPass = u.pass || generic;
+
+  if (!expectedPass || password !== expectedPass) {
+    return { statusCode: 401, body: JSON.stringify({ ok: false, error: "Contraseña inválida" }) };
+  }
 
   const payload = {
-    sub: found.user,
-    role: found.role,
-    displayName: found.displayName || found.user,
-    puesto: found.puesto || found.role
+    sub: email,
+    name: u.name || email.split("@")[0],
+    role: u.role || "soporte",
+    puesto: u.puesto || "",
+    modulo: u.modulo || "",
   };
 
-  const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "8h" });
-
-  return j(200, true, "OK", {
-    token,
-    user: payload.sub,
-    role: payload.role,
-    displayName: payload.displayName,
-    puesto: payload.puesto
-  });
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ ok: true, token, user: payload }),
+  };
 };

@@ -1,439 +1,771 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-/* ───────── helpers ───────── */
-function cls(...xs){ return xs.filter(Boolean).join(" "); }
-function fmt(dt){
-  if(!dt) return "—";
-  try { return new Date(dt).toLocaleString("es-MX"); } catch { return String(dt); }
-}
-function Badge({ok, at}) {
-  const color = ok ? "bg-green-100 text-green-800 ring-green-200" : "bg-red-100 text-red-800 ring-red-200";
-  const label = ok ? "Enviado" : "Falló";
+/* ============================================================
+   Utilidades
+   ============================================================ */
+const API = {
+  LIST: "/.netlify/functions/tickets-list",
+  UPDATE: "/.netlify/functions/tickets-update",
+  AUTH: "/.netlify/functions/auth",
+};
+
+// Dominio por defecto para completar usuarios cortos (sin @)
+const DEFAULT_LOGIN_DOMAIN = "sityps.org.mx";
+
+const ESTADOS = [
+  ["nuevo", "Nuevo"],
+  ["en_proceso", "En proceso"],
+  ["en_espera", "En espera"],
+  ["resuelto", "Resuelto"],
+  ["cerrado", "Cerrado"],
+];
+
+const PRIORIDADES = [
+  ["Baja", "Baja"],
+  ["Media", "Media"],
+  ["Alta", "Alta"],
+  ["Urgente", "Urgente"],
+];
+
+const MODULOS = [
+  "Secretaría General",
+  "Secretaria de Organización, actas y acuerdos",
+  "Secretaria de Asuntos Laborales",
+  "Secretaría de Formación, Capacitación y Desarrollo Profesional",
+  "Secretaría de Seguridad y Previsión Social",
+  "Secretaría de Escalafón y Promoción de Plazas",
+  "Secretaría de Créditos, vivienda y prestaciones económicas",
+  "Secretaría de Relaciones Prensa y propaganda",
+  "Secretaría de Finanzas",
+  "Secretaría de Fomento Cultural y Deportivo",
+  "Secretaría de la Mujer y Equidad de Género",
+  "Comisión de Honor y Justicia",
+  "Comité Electoral",
+  "Comisión Juridica",
+];
+
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(+d)) return iso;
+  return d.toLocaleString();
+};
+
+const pillEstado = (estado) => {
+  const map = {
+    nuevo: "bg-rose-100 text-rose-700",
+    en_proceso: "bg-amber-100 text-amber-700",
+    en_espera: "bg-gray-200 text-gray-700",
+    resuelto: "bg-emerald-100 text-emerald-700",
+    cerrado: "bg-slate-200 text-slate-700",
+  };
   return (
-    <div className="flex items-start gap-2">
-      <span className={cls("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", color)}>
-        {label}
-      </span>
-      <span className="text-[11px] leading-5 text-slate-500">{fmt(at)}</span>
-    </div>
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${map[estado] || "bg-slate-100 text-slate-700"}`}>
+      {(ESTADOS.find(([k]) => k === estado)?.[1]) || estado}
+    </span>
   );
-}
-function uniq(xs){ return [...new Set((xs||[]).filter(Boolean))]; }
-function normalizeEstado(v){ return String(v||"").toLowerCase().replace(/\s+/g,"_"); }
-function humanEstado(v){ return String(v||"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase()); }
-function csvEscape(x){
-  const s = String(x ?? "");
-  if (s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replace(/"/g,'""')}"`;
-  return s;
-}
-function buildCSV(rows){
-  const headers = [
-    "Folio","Fecha","Módulo","Tipo","Nombre","Correo","Unidad",
-    "Estado","Prioridad","Último correo OK","Último correo Fecha"
-  ];
-  const lines = [headers.join(",")];
-  for(const t of rows){
-    lines.push([
-      csvEscape(t.folio),
-      csvEscape(fmt(t.submittedAt)),
-      csvEscape(t.moduloDestino || t.modulo || ""),
-      csvEscape(t.tipo || ""),
-      csvEscape(t.nombre || ""),
-      csvEscape(t.correo || ""),
-      csvEscape(t.unidadAdscripcion || ""),
-      csvEscape(humanEstado(t.estado) || ""),
-      csvEscape(t.prioridad || ""),
-      csvEscape(t.lastMail?.ok ? "Sí" : (t.lastMail ? "No" : "—")),
-      csvEscape(t.lastMail?.at ? fmt(t.lastMail.at) : "—"),
-    ].join(","));
-  }
-  return lines.join("\n");
-}
-function downloadCSV(filename, text){
-  const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.style.display = "none";
-  document.body.appendChild(a); a.click();
-  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
-}
+};
 
-/* ───────── sort helpers ───────── */
-const PRIORITY_WEIGHT = { "Alta": 3, "Media": 2, "Baja": 1 };
-function cmp(a,b){
-  if (a===b) return 0;
-  if (a===undefined || a===null) return -1;
-  if (b===undefined || b===null) return 1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b), "es", { sensitivity: "base", numeric: true });
-}
-function getSortVal(t, key){
-  switch(key){
-    case "folio": return t.folio || "";
-    case "submittedAt": return t.submittedAt ? +new Date(t.submittedAt) : 0;
-    case "modulo": return (t.moduloDestino || t.modulo || "");
-    case "tipo": return t.tipo || "";
-    case "solicitante": return t.nombre || "";
-    case "estado": return normalizeEstado(t.estado || "");
-    case "prioridad": return PRIORITY_WEIGHT[t.prioridad] || 0;
-    case "lastMailAt": return t.lastMail?.at ? +new Date(t.lastMail.at) : 0;
-    default: return "";
-  }
-}
-function SortHeader({label, colKey, sortKey, sortDir, onSort, className}){
-  const active = sortKey === colKey;
-  const icon = !active ? "↕" : (sortDir === "asc" ? "▲" : "▼");
+const pillPrioridad = (p) => {
+  const map = {
+    Baja: "bg-slate-100 text-slate-700",
+    Media: "bg-sky-100 text-sky-700",
+    Alta: "bg-orange-100 text-orange-700",
+    Urgente: "bg-red-100 text-red-700",
+  };
   return (
-    <button
-      type="button"
-      onClick={()=>onSort(colKey)}
-      className={cls("group inline-flex items-center gap-1 font-semibold", className)}
-      title={active ? `Ordenado ${sortDir==="asc"?"ascendente":"descendente"}` : "Ordenar"}
-    >
-      <span>{label}</span>
-      <span className={cls("text-xs opacity-60 group-hover:opacity-100", active && "opacity-100")}>{icon}</span>
-    </button>
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${map[p] || "bg-slate-100 text-slate-700"}`}>
+      {p || "—"}
+    </span>
   );
-}
+};
 
-/* ───────── page ───────── */
-export default function Backoffice(){
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState([]);
-  const [q, setQ] = useState("");
+const decodeJWT = (token) => {
+  try {
+    const [, payload] = token.split(".");
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(decodeURIComponent(escape(json)));
+  } catch {
+    return null;
+  }
+};
+
+const fetchJSON = async (url, opts = {}, token) => {
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.json();
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Normaliza el login: si no trae arroba, completa con el dominio por defecto */
+const normalizeLoginEmail = (raw) => {
+  const s = (raw || "").trim().toLowerCase();
+  if (!s) return "";
+  if (s.includes("@")) return s;
+  return `${s}@${DEFAULT_LOGIN_DOMAIN}`;
+};
+
+/* ============================================================
+   Componente principal
+   ============================================================ */
+export default function Backoffice() {
+  const [token, setToken] = useState(() => localStorage.getItem("sityps_jwt") || "");
+  const user = useMemo(() => (token ? decodeJWT(token) : null), [token]);
 
   // filtros
-  const [fEstado, setFEstado] = useState("todos");
-  const [fModulo, setFModulo] = useState("todos");
-
-  // orden
-  const [sortKey, setSortKey] = useState("submittedAt");
-  const [sortDir, setSortDir] = useState("desc"); // asc | desc
-
-  // paginación
-  const [page, setPage] = useState(1);
+  const [q, setQ] = useState("");
+  const [estado, setEstado] = useState("todos");
+  const [modulo, setModulo] = useState("todos");
   const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
 
-  // botón reenviar
-  const [busyFolio, setBusyFolio] = useState("");
+  // datos
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
-    setLoading(true);
-    try{
-      const r = await fetch("/.netlify/functions/tickets-list");
-      const j = await r.json();
-      if(j?.ok && Array.isArray(j.items)) setItems(j.items);
-      else setItems([]);
-    }catch{
-      setItems([]);
-    }finally{
+  // UI
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
+  const [openView, setOpenView] = useState(null); // ticket completo en modal
+  const [savingCell, setSavingCell] = useState(""); // folio guardando estado
+
+  // login form
+  const [loginMail, setLoginMail] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [busyLogin, setBusyLogin] = useState(false);
+
+  // Debounce de búsqueda
+  const qRef = useRef("");
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (qRef.current !== q) {
+        qRef.current = q;
+        setPage(1);
+        void load();
+      }
+    }, 380);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line
+  }, [q]);
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line
+  }, [estado, modulo, pageSize, page, token]);
+
+  async function load() {
+    if (!token) return; // espera login
+    try {
+      setLoading(true);
+      setError("");
+      const url = new URL(API.LIST, window.location.origin);
+      if (q) url.searchParams.set("q", q);
+      if (estado !== "todos") url.searchParams.set("estado", estado);
+      if (modulo !== "todos") url.searchParams.set("modulo", modulo);
+      url.searchParams.set("pageSize", String(pageSize));
+      url.searchParams.set("page", String(page));
+
+      const data = await fetchJSON(url.toString(), {}, token);
+      if (!data.ok) throw new Error(data.error || "No se pudieron obtener tickets");
+      setRows(Array.isArray(data.items) ? data.items : []);
+      setTotal(Number(data.total || 0));
+    } catch (e) {
+      setRows([]);
+      setTotal(0);
+      setError(String(e.message || e));
+    } finally {
       setLoading(false);
     }
-  };
+  }
 
-  useEffect(()=>{ load(); }, []);
-
-  // opciones únicas de filtros
-  const estadosOpts = useMemo(()=>{
-    const all = uniq(items.map(t => normalizeEstado(t.estado || ""))).filter(Boolean);
-    const order = ["nuevo","en_proceso","resuelto","cerrado"];
-    const inOrder = order.filter(x => all.includes(x));
-    const rest = all.filter(x => !inOrder.includes(x)).sort();
-    return ["todos", ...inOrder, ...rest];
-  }, [items]);
-
-  const modulosOpts = useMemo(()=>{
-    const all = uniq(items.map(t => (t.moduloDestino || t.modulo || "").trim())).filter(Boolean).sort();
-    return ["todos", ...all];
-  }, [items]);
-
-  // rows filtradas
-  const filtered = useMemo(()=>{
-    const term = q.trim().toLowerCase();
-    return items.filter(t => {
-      if (term) {
-        const hay = [t.folio, t.nombre, t.correo, t.moduloDestino || t.modulo, t.tipo, t.estado, t.prioridad]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-        if (!hay) return false;
-      }
-      if (fEstado !== "todos" && normalizeEstado(t.estado) !== fEstado) return false;
-      if (fModulo !== "todos" && (t.moduloDestino || t.modulo || "").trim() !== fModulo) return false;
-      return true;
-    });
-  }, [items, q, fEstado, fModulo]);
-
-  // ordenadas
-  const sorted = useMemo(()=>{
-    const arr = filtered.slice();
-    arr.sort((a,b)=>{
-      const va = getSortVal(a, sortKey);
-      const vb = getSortVal(b, sortKey);
-      const r = cmp(va, vb);
-      return sortDir === "asc" ? r : -r;
-    });
-    return arr;
-  }, [filtered, sortKey, sortDir]);
-
-  // paginadas
-  const total = sorted.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const start = (currentPage - 1) * pageSize;
-  const end = start + pageSize;
-  const rows = sorted.slice(start, end);
-
-  // acciones UI
-  const clearFilters = () => { setQ(""); setFEstado("todos"); setFModulo("todos"); };
-  const onSort = (key) => {
-    if (key === sortKey) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir(key==="submittedAt" ? "desc" : "asc"); }
-  };
-  useEffect(()=>{ setPage(1); }, [q, fEstado, fModulo, pageSize]); // reset paginación al filtrar/cambiar tamaño
-
-  const exportCSV = () => {
-    if (sorted.length === 0) return;
-    const csv = buildCSV(sorted); // exporta TODO el filtrado, no solo la página
-    downloadCSV(`tickets_${Date.now()}.csv`, csv);
-  };
-
-  const resend = async (folio) => {
-    setBusyFolio(folio);
-    try{
-      const r = await fetch("/.netlify/functions/tickets-notify", {
+  async function doLogin(e) {
+    e.preventDefault();
+    setBusyLogin(true);
+    setError("");
+    try {
+      const email = normalizeLoginEmail(loginMail);
+      const resp = await fetchJSON(API.AUTH, {
         method: "POST",
-        headers: { "content-type":"application/json" },
-        body: JSON.stringify({ folio, reason: "Reenvío manual desde backoffice" }),
+        body: JSON.stringify({ email, password: loginPass }),
       });
-      const j = await r.json();
-      if(j?.ok){
-        await load();
-        alert(`Notificación reenviada para ${folio}.`);
-      }else{
-        alert(`No se pudo reenviar: ${j?.error || "Error desconocido"}`);
-      }
-    }catch(e){
-      alert(`No se pudo reenviar: ${e.message || e}`);
-    }finally{
-      setBusyFolio("");
+      if (!resp.ok || !resp.token) throw new Error(resp.error || "Credenciales inválidas");
+      localStorage.setItem("sityps_jwt", resp.token);
+      setToken(resp.token);
+      setLoginMail("");
+      setLoginPass("");
+      setOk("Sesión iniciada");
+      await sleep(800);
+      setOk("");
+      void load();
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setBusyLogin(false);
     }
-  };
+  }
 
+  function logout() {
+    localStorage.removeItem("sityps_jwt");
+    setToken("");
+    setRows([]);
+    setTotal(0);
+  }
+
+  // número de abiertos para badge
+  const abiertos = useMemo(
+    () => rows.filter((r) => ["nuevo", "en_proceso", "en_espera"].includes(r?.estado)).length,
+    [rows]
+  );
+
+  function exportCSV() {
+    const cols = [
+      "folio",
+      "fecha",
+      "modulo",
+      "tipo",
+      "solicitante",
+      "correo",
+      "prioridad",
+      "estado",
+      "ultimoCorreo",
+    ];
+    const lines = [cols.join(",")];
+    rows.forEach((r) => {
+      const line = [
+        safe(r.folio),
+        safe(fmtDate(r.fecha || r.fechaISO)),
+        safe(r.modulo),
+        safe(r.tipo),
+        safe(r.nombre || r.solicitante?.nombre),
+        safe(r.correo || r.solicitante?.correo),
+        safe(r.prioridad),
+        safe(r.estado),
+        safe(fmtDate(r.ultimoCorreo || r.ultimoCorreoISO)),
+      ].join(",");
+      lines.push(line);
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "tickets.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function safe(v) {
+    const s = (v ?? "").toString().replaceAll('"', '""');
+    return `"${s}"`;
+  }
+
+  async function inlineUpdateEstado(folio, nuevoEstado) {
+    try {
+      setSavingCell(folio);
+      const resp = await fetchJSON(
+        API.UPDATE,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            folio,
+            cambios: {
+              estado: nuevoEstado,
+              nota: `Estado cambiado a "${ESTADOS.find(([k]) => k === nuevoEstado)?.[1] || nuevoEstado}" desde vista de tabla.`,
+            },
+          }),
+        },
+        token
+      );
+      if (!resp.ok) throw new Error(resp.error || "No se pudo actualizar");
+      setOk("Actualizado");
+      await load();
+      setTimeout(() => setOk(""), 800);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setSavingCell("");
+    }
+  }
+
+  async function saveFromModal(folio, cambios) {
+    try {
+      setSavingCell(folio);
+      const resp = await fetchJSON(API.UPDATE, { method: "POST", body: JSON.stringify({ folio, cambios }) }, token);
+      if (!resp.ok) throw new Error(resp.error || "No se pudo actualizar");
+      setOk("Actualizado");
+      await load();
+      setTimeout(() => setOk(""), 800);
+      setOpenView(null);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setSavingCell("");
+    }
+  }
+
+  // Paginación
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  /* ------------------- Vista de login si no hay sesión ------------------- */
+  if (!user) {
+    return (
+      <section className="max-w-6xl mx-auto px-4 py-10">
+        <h1 className="text-2xl font-semibold mb-6">Backoffice — Tickets</h1>
+
+        {error && <div className="mb-4 rounded border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">{error}</div>}
+        {ok && <div className="mb-4 rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">{ok}</div>}
+
+        <form onSubmit={doLogin} className="max-w-md space-y-3 rounded-xl border bg-white p-5 shadow-sm">
+          <div>
+            <label className="block text-sm mb-1">Correo o usuario</label>
+            <input
+              className="w-full rounded border px-3 py-2 outline-none focus:ring"
+              type="text" // permite usuario sin @
+              placeholder="Ej. soporte o soporte@sityps.org.mx"
+              required
+              value={loginMail}
+              onChange={(e) => setLoginMail(e.target.value)}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Si escribes sólo el usuario, se usará <code>@{DEFAULT_LOGIN_DOMAIN}</code>.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Contraseña</label>
+            <input
+              className="w-full rounded border px-3 py-2 outline-none focus:ring"
+              type="password"
+              required
+              value={loginPass}
+              onChange={(e) => setLoginPass(e.target.value)}
+            />
+          </div>
+          <button
+            disabled={busyLogin}
+            className="rounded bg-red-700 text-white px-4 py-2 disabled:opacity-60"
+          >
+            {busyLogin ? "Ingresando…" : "Ingresar"}
+          </button>
+          <p className="text-xs text-slate-500">Acceso restringido a personal autorizado del SITYPS.</p>
+        </form>
+      </section>
+    );
+  }
+
+  /* ------------------------------ Vista principal ------------------------------ */
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      {/* Título */}
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800 text-center sm:text-left">
-          Backoffice — Tickets
-        </h1>
-        <p className="text-sm text-slate-500">Administra solicitudes y seguimiento.</p>
+    <section className="max-w-7xl mx-auto px-4 py-8">
+      <div className="flex items-start gap-4 mb-6">
+        <div className="flex-1"></div>
+        <div className="flex-1 text-center">
+          <h1 className="text-2xl font-semibold">Backoffice — Tickets</h1>
+          <p className="text-slate-500 text-sm">Administra solicitudes y seguimiento.</p>
+        </div>
+        <div className="flex-1 flex justify-end">
+          <UserBox user={user} abiertos={abiertos} onLogout={logout} />
+        </div>
       </div>
 
-      {/* Controles: búsqueda + filtros */}
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="sm:col-span-2">
-          <label className="block text-xs font-medium text-slate-600">Buscar</label>
+      {error && <div className="mb-3 rounded border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">{error}</div>}
+      {ok && <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">{ok}</div>}
+
+      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-end mb-4">
+        <div className="flex-1">
+          <label className="block text-sm mb-1">Buscar</label>
           <input
-            value={q}
-            onChange={(e)=>setQ(e.target.value)}
+            className="w-full rounded border px-3 py-2 outline-none focus:ring"
             placeholder="Folio, nombre, correo, módulo, estado…"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600">Estado</label>
+          <label className="block text-sm mb-1">Estado</label>
           <select
-            value={fEstado}
-            onChange={(e)=>setFEstado(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
+            className="rounded border px-3 py-2 outline-none focus:ring min-w-[12rem]"
+            value={estado}
+            onChange={(e) => {
+              setEstado(e.target.value);
+              setPage(1);
+            }}
           >
-            {estadosOpts.map(v=>(
-              <option key={v} value={v}>{v==="todos" ? "Todos" : humanEstado(v)}</option>
+            <option value="todos">Todos</option>
+            {ESTADOS.map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
             ))}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600">Módulo</label>
+          <label className="block text-sm mb-1">Módulo</label>
           <select
-            value={fModulo}
-            onChange={(e)=>setFModulo(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300"
+            className="rounded border px-3 py-2 outline-none focus:ring min-w-[18rem]"
+            value={modulo}
+            onChange={(e) => {
+              setModulo(e.target.value);
+              setPage(1);
+            }}
           >
-            {modulosOpts.map(v=>(
-              <option key={v} value={v}>{v==="todos" ? "Todos" : v}</option>
+            <option value="todos">Todos</option>
+            {MODULOS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
           </select>
         </div>
-      </div>
-
-      {/* Acciones + paginación superior */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3 text-sm text-slate-600">
-          <span>{loading ? "Cargando…" : `${total} ticket(s)`}</span>
-          <span className="hidden sm:inline-block text-slate-400">•</span>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-600">Por página</label>
-            <select
-              value={pageSize}
-              onChange={(e)=>setPageSize(Number(e.target.value))}
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-rose-300"
-            >
-              {[10,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-            <span className="text-slate-500">{total === 0 ? "0–0" : `${start+1}–${Math.min(end,total)}`} de {total}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
           <button
-            onClick={clearFilters}
-            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              setQ("");
+              setEstado("todos");
+              setModulo("todos");
+              setPage(1);
+            }}
+            className="rounded border px-3 py-2"
           >
             Limpiar filtros
           </button>
-          <button
-            onClick={exportCSV}
-            disabled={sorted.length===0}
-            className={cls(
-              "inline-flex items-center rounded-md bg-slate-700 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800",
-              sorted.length===0 && "opacity-60 cursor-not-allowed"
-            )}
-          >
+          <button onClick={exportCSV} className="rounded bg-slate-800 text-white px-3 py-2">
             Exportar CSV (filtrado)
           </button>
-          {/* Paginación */}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2 text-sm">
+        <div>
+          <span className="text-slate-500">{total} ticket(s)</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="text-slate-500">Por página</label>
+          <select
+            className="rounded border px-2 py-1"
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+          >
+            {[10, 25, 50, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
           <div className="flex items-center gap-1">
             <button
-              onClick={()=>setPage(1)}
-              disabled={currentPage<=1}
-              className={cls("rounded-md px-2 py-1 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-              title="Primera página"
-            >«</button>
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded border px-2 py-1 disabled:opacity-50"
+            >
+              ←
+            </button>
+            <span className="px-1">
+              {page} / {pages}
+            </span>
             <button
-              onClick={()=>setPage(p=>Math.max(1,p-1))}
-              disabled={currentPage<=1}
-              className={cls("rounded-md px-2 py-1 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-              title="Anterior"
-            >‹</button>
-            <span className="mx-1 text-sm text-slate-600">{currentPage} / {totalPages}</span>
-            <button
-              onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
-              disabled={currentPage>=totalPages}
-              className={cls("rounded-md px-2 py-1 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-              title="Siguiente"
-            >›</button>
-            <button
-              onClick={()=>setPage(totalPages)}
-              disabled={currentPage>=totalPages}
-              className={cls("rounded-md px-2 py-1 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-              title="Última página"
-            >»</button>
+              disabled={page >= pages}
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
+              className="rounded border px-2 py-1 disabled:opacity-50"
+            >
+              →
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Tabla */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-700">
+      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-slate-600">
             <tr>
-              <th className="px-3 py-2">
-                <SortHeader label="Folio" colKey="folio" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Fecha" colKey="submittedAt" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Módulo" colKey="modulo" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Tipo" colKey="tipo" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Solicitante" colKey="solicitante" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Estado" colKey="estado" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Prioridad" colKey="prioridad" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2">
-                <SortHeader label="Último correo" colKey="lastMailAt" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              </th>
-              <th className="px-3 py-2 font-semibold text-right">Acciones</th>
+              <th className="text-left px-4 py-2 w-[10rem]">Folio</th>
+              <th className="text-left px-2 py-2 w-[12rem]">Fecha</th>
+              <th className="text-left px-2 py-2">Módulo</th>
+              <th className="text-left px-2 py-2">Tipo</th>
+              <th className="text-left px-2 py-2">Solicitante</th>
+              <th className="text-left px-2 py-2">Prioridad</th>
+              <th className="text-left px-2 py-2 w-[12rem]">Estado</th>
+              <th className="text-left px-2 py-2 w-[12rem]">Último correo</th>
+              <th className="text-right px-2 py-2 w-[10rem]">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">Cargando…</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">Sin tickets</td></tr>
-            ) : rows.map((t)=>(
-              <tr key={t.folio} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-medium text-slate-800">{t.folio}</td>
-                <td className="px-3 py-2">{fmt(t.submittedAt)}</td>
-                <td className="px-3 py-2">{t.moduloDestino || t.modulo || "—"}</td>
-                <td className="px-3 py-2">{t.tipo || "—"}</td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-col">
-                    <span className="text-slate-800">{t.nombre || "—"}</span>
-                    <span className="text-xs text-slate-500">{t.correo || "—"}</span>
-                  </div>
-                </td>
-                <td className="px-3 py-2">{humanEstado(t.estado) || "—"}</td>
-                <td className="px-3 py-2">{t.prioridad || "—"}</td>
-                <td className="px-3 py-2">
-                  {t.lastMail ? <Badge ok={!!t.lastMail.ok} at={t.lastMail.at || t.lastMailAt} /> : <span className="text-slate-400">—</span>}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end">
-                    <button
-                      onClick={()=>resend(t.folio)}
-                      disabled={busyFolio === t.folio}
-                      className={cls(
-                        "inline-flex items-center rounded-md bg-rose-600 px-3 py-1.5 text-white text-sm font-medium shadow-sm hover:bg-rose-700",
-                        busyFolio===t.folio && "opacity-60 cursor-not-allowed"
-                      )}
-                    >
-                      {busyFolio===t.folio ? "Reenviando…" : "Reenviar correo"}
-                    </button>
-                  </div>
+            {loading && (
+              <tr>
+                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                  Cargando…
                 </td>
               </tr>
-            ))}
+            )}
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
+                  Sin tickets
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              rows.map((r) => (
+                <tr key={r.folio} className="border-t">
+                  <td className="px-4 py-2 font-mono text-xs">{r.folio}</td>
+                  <td className="px-2 py-2">{fmtDate(r.fecha || r.fechaISO)}</td>
+                  <td className="px-2 py-2">{r.modulo || "—"}</td>
+                  <td className="px-2 py-2">{r.tipo || "—"}</td>
+                  <td className="px-2 py-2">
+                    <div className="leading-tight">
+                      <div className="font-medium">{r.nombre || r.solicitante?.nombre || "—"}</div>
+                      <div className="text-xs text-slate-500">{r.correo || r.solicitante?.correo || "—"}</div>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2">{pillPrioridad(r.prioridad || "—")}</td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-center gap-2">
+                      {pillEstado(r.estado)}
+                      <select
+                        disabled={savingCell === r.folio}
+                        className="rounded border px-2 py-1 text-xs"
+                        value={r.estado}
+                        onChange={(e) => inlineUpdateEstado(r.folio, e.target.value)}
+                      >
+                        {ESTADOS.map(([k, v]) => (
+                          <option key={k} value={k}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2">{fmtDate(r.ultimoCorreo || r.ultimoCorreoISO)}</td>
+                  <td className="px-2 py-2 text-right">
+                    <button
+                      onClick={() => setOpenView(r)}
+                      className="rounded border px-3 py-1 hover:bg-slate-50"
+                    >
+                      Ver / Editar
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
 
-      {/* paginación inferior */}
-      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-        <button
-          onClick={()=>setPage(1)}
-          disabled={currentPage<=1}
-          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-          title="Primera página"
-        >«</button>
-        <button
-          onClick={()=>setPage(p=>Math.max(1,p-1))}
-          disabled={currentPage<=1}
-          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage<=1 ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-          title="Anterior"
-        >‹</button>
-        <span className="mx-1 text-sm text-slate-600">{currentPage} / {totalPages}</span>
-        <button
-          onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
-          disabled={currentPage>=totalPages}
-          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-          title="Siguiente"
-        >›</button>
-        <button
-          onClick={()=>setPage(totalPages)}
-          disabled={currentPage>=totalPages}
-          className={cls("rounded-md px-3 py-1.5 text-sm border", currentPage>=totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-slate-50 border-slate-300")}
-          title="Última página"
-        >»</button>
+      {openView && (
+        <TicketModal
+          saving={savingCell === openView.folio}
+          ticket={openView}
+          onClose={() => setOpenView(null)}
+          onSave={saveFromModal}
+        />
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+   Subcomponentes
+   ============================================================ */
+function UserBox({ user, abiertos, onLogout }) {
+  const nombre = [user?.nombre, user?.apellidos].filter(Boolean).join(" ") || user?.name || "Usuario";
+  const puesto = user?.puesto || user?.role || "Personal autorizado";
+  const modulo = user?.modulo || user?.department || "";
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="text-right leading-tight">
+        <div className="font-semibold">{nombre}</div>
+        <div className="text-xs text-slate-500">{puesto}</div>
+        {modulo && <div className="text-xs text-slate-500">{modulo}</div>}
+      </div>
+      <div className="relative">
+        <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center font-semibold">
+          {nombre?.[0]?.toUpperCase() || "U"}
+        </div>
+        <span
+          title="Abiertos"
+          className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 rounded-full bg-red-600 text-white text-xs flex items-center justify-center"
+        >
+          {abiertos}
+        </span>
+      </div>
+      <button onClick={onLogout} className="ml-2 rounded border px-3 py-1 text-sm hover:bg-slate-50">
+        Salir
+      </button>
+    </div>
+  );
+}
+
+function TicketModal({ ticket, onClose, onSave, saving }) {
+  const [prioridad, setPrioridad] = useState(ticket.prioridad || "Media");
+  const [estado, setEstado] = useState(ticket.estado || "nuevo");
+  const [asignadoA, setAsignadoA] = useState(ticket.asignadoA || "");
+  const [nota, setNota] = useState("");
+
+  const history = Array.isArray(ticket.history) ? ticket.history : ticket.historial || [];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <div className="font-semibold">
+            Ticket <span className="font-mono">{ticket.folio}</span>
+          </div>
+          <button onClick={onClose} className="rounded border px-2 py-1 text-sm hover:bg-slate-50">
+            Cerrar
+          </button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 p-5">
+          <div className="space-y-3">
+            <div className="text-sm text-slate-500">Solicitante</div>
+            <div className="rounded-md border p-3">
+              <div className="font-medium">{ticket.nombre || ticket.solicitante?.nombre || "—"}</div>
+              <div className="text-sm">{ticket.correo || ticket.solicitante?.correo || "—"}</div>
+              <div className="text-xs text-slate-500">{ticket.telefono || ticket.solicitante?.telefono || "—"}</div>
+            </div>
+
+            <div className="text-sm text-slate-500">Clasificación</div>
+            <div className="rounded-md border p-3">
+              <div className="text-sm"><span className="text-slate-500">Módulo:</span> {ticket.modulo || "—"}</div>
+              <div className="text-sm"><span className="text-slate-500">Tipo:</span> {ticket.tipo || "—"}</div>
+              <div className="text-sm"><span className="text-slate-500">Fecha:</span> {fmtDate(ticket.fecha || ticket.fechaISO)}</div>
+            </div>
+
+            <div className="text-sm text-slate-500">Adjuntos</div>
+            <div className="rounded-md border p-3 text-sm space-y-2">
+              {ticket.acuseUrl ? (
+                <a className="text-sky-600 underline" href={ticket.acuseUrl} target="_blank" rel="noreferrer">
+                  Acuse RH
+                </a>
+              ) : (
+                <div className="text-slate-400">Sin acuse</div>
+              )}
+              {Array.isArray(ticket.adjuntos) && ticket.adjuntos.length > 0 ? (
+                <ul className="list-disc list-inside">
+                  {ticket.adjuntos.map((a, i) => (
+                    <li key={i}>
+                      <a className="text-sky-600 underline" href={a.url || a.href} target="_blank" rel="noreferrer">
+                        {a.name || a.nombre || `Adjunto ${i + 1}`}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-slate-400">Sin adjuntos</div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm text-slate-500">Actualizar</div>
+            <div className="rounded-md border p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Estado</label>
+                  <select
+                    className="w-full rounded border px-2 py-2"
+                    value={estado}
+                    onChange={(e) => setEstado(e.target.value)}
+                  >
+                    {ESTADOS.map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Prioridad</label>
+                  <select
+                    className="w-full rounded border px-2 py-2"
+                    value={prioridad}
+                    onChange={(e) => setPrioridad(e.target.value)}
+                  >
+                    {PRIORIDADES.map(([k]) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Asignado a (correo)</label>
+                <input
+                  className="w-full rounded border px-3 py-2"
+                  placeholder="alguien@sityps.org.mx"
+                  value={asignadoA}
+                  onChange={(e) => setAsignadoA(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Nota</label>
+                <textarea
+                  className="w-full min-h-[72px] rounded border px-3 py-2"
+                  placeholder="Describe la acción o acuerdo…"
+                  value={nota}
+                  onChange={(e) => setNota(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  disabled={saving}
+                  onClick={() =>
+                    onSave(ticket.folio, {
+                      estado,
+                      prioridad,
+                      asignadoA: asignadoA || undefined,
+                      nota: (nota || "").trim() || undefined,
+                    })
+                  }
+                  className="rounded bg-red-700 text-white px-4 py-2 disabled:opacity-60"
+                >
+                  {saving ? "Guardando…" : "Guardar cambios"}
+                </button>
+              </div>
+            </div>
+
+            <div className="text-sm text-slate-500">Historial</div>
+            <div className="rounded-md border p-3 max-h-[260px] overflow-auto">
+              {Array.isArray(history) && history.length > 0 ? (
+                <ul className="space-y-2">
+                  {history
+                    .slice()
+                    .reverse()
+                    .map((h, i) => (
+                      <li key={i} className="text-sm">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">{h.actor || h.usuario || "Sistema"}</span>{" "}
+                            <span className="text-slate-500">— {h.accion || h.action || "Actualización"}</span>
+                          </div>
+                          <div className="text-xs text-slate-500">{fmtDate(h.fecha || h.ts || h.fechaISO)}</div>
+                        </div>
+                        {h.nota && <div className="text-slate-700">{h.nota}</div>}
+                        <div className="text-xs text-slate-500">
+                          {h.estado && <>Estado: {h.estado} · </>}
+                          {h.prioridad && <>Prioridad: {h.prioridad}</>}
+                        </div>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <div className="text-slate-400 text-sm">Sin movimientos</div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
