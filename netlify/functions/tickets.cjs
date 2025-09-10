@@ -1,11 +1,5 @@
-// netlify/functions/tickets.cjs
-// “Shim” de compatibilidad: reexporta helpers desde _store.cjs
-const { getTicketStore, readIndex, writeIndex, STORE_NAME, INDEX_KEY } = require("./_store.cjs");
+'use strict';
 
-module.exports = {
-  getTicketStore,
-  readIndex,
-  writeIndex,
-  STORE_NAME,
-  INDEX_KEY,
-};
+// Shim de compatibilidad: reexporta TODO desde _store.cjs
+const api = require('./_store.cjs');
+module.exports = api;
