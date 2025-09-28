@@ -1,10 +1,10 @@
-// netlify/functions/auth.cjs
-// Login Backoffice SITYPS (CommonJS)
+'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const jwt = require('jsonwebtoken');
 
-// Utilidades
-const ok = (bodyObj, status = 200) => ({
+const ok = (data, status = 200) => ({
   statusCode: status,
   headers: {
     'Content-Type': 'application/json; charset=utf-8',
@@ -12,112 +12,60 @@ const ok = (bodyObj, status = 200) => ({
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   },
-  body: JSON.stringify(bodyObj),
+  body: JSON.stringify(data),
 });
 
-const err = (message, status = 400) => ok({ ok: false, error: message }, status);
+const err = (msg, status = 400) => ok({ ok: false, error: msg }, status);
 
-// Normaliza JSON desde variable de entorno (a veces viene con comillas adicionales)
-function parseAdminUsers(envValue) {
-  if (!envValue) return [];
-  let v = envValue.trim();
+function loadAdmins() {
   try {
-    // Si por algún motivo viene doblemente serializado, intenta dos veces
-    let parsed = JSON.parse(v);
-    if (typeof parsed === 'string') parsed = JSON.parse(parsed);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
+    const p = path.join(__dirname, '_admin_users.json');
+    const txt = fs.readFileSync(p, 'utf8');
+    const arr = JSON.parse(txt);
+    return Array.isArray(arr) ? arr : [];
   } catch {
     return [];
   }
 }
 
-// Genera email normalizado a partir de usuario o correo
-function normalizeIdentity(raw, defaultDomain = 'sityps.org.mx') {
-  const s = String(raw || '').trim().toLowerCase();
-  if (!s) return { email: '', user: '' };
-  if (s.includes('@')) {
-    const [u, dom] = s.split('@');
-    return { email: `${u}@${dom}`, user: u };
-  }
-  return { email: `${s}@${defaultDomain}`, user: s };
-}
-
 exports.handler = async (event) => {
-  // Preflight
   if (event.httpMethod === 'OPTIONS') return ok({ ok: true });
-
-  if (event.httpMethod !== 'POST') {
-    return err('Method Not Allowed', 405);
-  }
-
-  if (!event.body) {
-    return err('Faltan credenciales', 400);
-  }
 
   let payload = {};
   try {
-    payload = JSON.parse(event.body);
+    payload = JSON.parse(event.body || '{}');
   } catch {
     return err('JSON inválido', 400);
   }
 
-  // Admite varios nombres de campo
   const rawId =
-    payload.email ??
-    payload.correo ??
-    payload.user ??
-    payload.usuario ??
-    '';
+    payload.email ?? payload.correo ?? payload.user ?? payload.usuario ?? '';
+  const password =
+    payload.password ?? payload.pass ?? payload.contrasena ?? payload['contraseña'] ?? '';
 
-  const password = payload.password ?? payload.pass ?? payload.contrasena ?? payload.contraseña ?? '';
+  if (!rawId || !password) return err('Faltan credenciales', 400);
 
-  if (!rawId || !password) {
-    return err('Faltan credenciales', 400);
-  }
+  // Normaliza: usa la parte antes de @ como "user"
+  const userId = String(rawId).toLowerCase().trim().split('@')[0];
 
-  // Cargar usuarios de entorno
-  const admins = parseAdminUsers(process.env.ADMIN_USERS_JSON);
-  if (!admins.length) {
-    return err('Configuración de usuarios no disponible', 500);
-  }
+  const admins = loadAdmins();
+  if (!admins.length) return err('Configuración de usuarios no disponible', 500);
 
-  // Dominios permitidos (si en un futuro usas otro, agrega aquí)
-  const DEFAULT_DOMAIN = 'sityps.org.mx';
+  const found = admins.find((a) => String(a.user).toLowerCase() === userId);
+  if (!found) return err('Usuario no autorizado', 403);
 
-  // Normalizar identidad
-  const { email, user } = normalizeIdentity(rawId, DEFAULT_DOMAIN);
+  if (password !== String(found.pass)) return err('Credenciales inválidas', 401);
 
-  // Buscar usuario: por local-part o por email
-  const found = admins.find((u) => {
-    const local = String(u.user || '').toLowerCase();
-    const fullEmail = (u.email ? String(u.email) : `${local}@${DEFAULT_DOMAIN}`).toLowerCase();
-    return local === user || fullEmail === email;
-  });
-
-  if (!found) {
-    // Usuario no existe
-    return err('Usuario no autorizado', 401);
-  }
-
-  // Validar contraseña
-  const rightPass = String(found.pass || '');
-  if (rightPass !== String(password)) {
-    return err('Usuario o contraseña incorrectos', 401);
-  }
-
-  // Emitir JWT
-  const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+  const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
   const token = jwt.sign(
     {
       sub: found.user,
-      email: `${found.user}@${DEFAULT_DOMAIN}`,
       role: found.role,
-      displayName: found.displayName,
+      name: found.displayName,
       puesto: found.puesto,
     },
     JWT_SECRET,
-    { expiresIn: '8h' }
+    { expiresIn: '8h' },
   );
 
   return ok({
@@ -125,7 +73,7 @@ exports.handler = async (event) => {
     token,
     user: {
       user: found.user,
-      email: `${found.user}@${DEFAULT_DOMAIN}`,
+      email: `${found.user}@sityps.org.mx`,
       role: found.role,
       displayName: found.displayName,
       puesto: found.puesto,

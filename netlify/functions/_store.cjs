@@ -1,56 +1,61 @@
 'use strict';
 
-const STORE_NAME = process.env.BLOBS_STORE_NAME || 'tickets';
+const { getBlobsStore } = require('./_blobs.cjs');
+const { STORE_NAME, TICKETS_PREFIX } = require('./_cfg.cjs');
 
-async function loadBlobs() {
-  return await import('@netlify/blobs');
+function keyForTicket(folio) {
+  return `${TICKETS_PREFIX}${folio}.json`;
+}
+async function _store() { return await getBlobsStore(STORE_NAME); }
+
+async function getTicket(folio) {
+  const s = await _store();
+  const raw = await s.get(keyForTicket(folio), { type: 'text' });
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
-async function _createRawStore() {
-  const { getStore } = await loadBlobs();
-
-  try {
-    const s = getStore({ name: STORE_NAME });
-    console.log('[blobs] usando auto-config, store =', STORE_NAME);
-    return s;
-  } catch (err) {
-    const siteID =
-      process.env.NETLIFY_SITE_ID ||
-      process.env.BLOBS_SITE_ID ||
-      process.env.SITE_ID;
-
-    const token =
-      process.env.NETLIFY_API_TOKEN ||
-      process.env.NETLIFY_AUTH_TOKEN ||
-      process.env.BLOBS_TOKEN;
-
-    const masked =
-      token ? token.slice(0, 4) + '...' + token.slice(-4) : '(vacío)';
-
-    console.log('[blobs] fallback manual. siteID =', siteID, ' store =', STORE_NAME, ' token =', masked);
-
-    if (!siteID || !token) throw err;
-    return getStore({ name: STORE_NAME, siteID, token });
-  }
+async function saveTicket(ticket) {
+  if (!ticket?.folio) throw new Error('Ticket sin folio');
+  const s = await _store();
+  const key = keyForTicket(ticket.folio);
+  await s.set(key, JSON.stringify(ticket), { contentType: 'application/json; charset=utf-8' });
+  return ticket;
 }
 
-async function makeStore() { return _createRawStore(); }
-const getTicketStore = makeStore;
-
-async function readIndex(store) {
-  try {
-    return (await store.getJSON('index.json')) || { last: 0, folios: [] };
-  } catch {
-    return { last: 0, folios: [] };
-  }
-}
-async function writeIndex(store, data) {
-  await store.setJSON('index.json', data || { last: 0, folios: [] });
-}
-async function listByPrefix(store, prefix) {
+// Listado robusto (por si el runtime no expone async-iterable)
+async function listTicketKeys(limit = 1000) {
+  const s = await _store();
   const out = [];
-  for await (const e of store.list({ prefix })) out.push(e);
+  if (typeof s.list === 'function') {
+    const it = s.list({ prefix: TICKETS_PREFIX });
+    if (it && typeof it[Symbol.asyncIterator] === 'function') {        // A) async-iterable
+      for await (const e of it) { const k = e?.key || e?.name || e?.path; if (k) out.push(k); if (out.length >= limit) break; }
+      return out;
+    }
+    if (Array.isArray(it)) {                                           // B) array
+      for (const e of it) { const k = e?.key || e?.name || e?.path; if (k) out.push(k); if (out.length >= limit) break; }
+      return out;
+    }
+    if (it && Array.isArray(it.items)) {                                // C) object.items
+      for (const e of it.items) { const k = e?.key || e?.name || e?.path; if (k) out.push(k); if (out.length >= limit) break; }
+      return out;
+    }
+  }
+  return out; // sin list() → no reventamos
+}
+
+async function readTicketsFromKeys(keys = [], max = 500) {
+  const s = await _store();
+  const out = [];
+  for (const k of keys.slice(0, max)) {
+    try { const raw = await s.get(k, { type:'text' }); if (!raw) continue; const t = JSON.parse(raw); if (t?.folio) out.push(t); } catch {}
+  }
   return out;
 }
 
-module.exports = { makeStore, getTicketStore, readIndex, writeIndex, listByPrefix, STORE_NAME };
+function norm(str='') {
+  return String(str || '').normalize('NFD').replace(/\p{Diacritic}/gu,'').trim().toLowerCase().replace(/\s+/g,'-');
+}
+
+module.exports = { keyForTicket, getTicket, saveTicket, listTicketKeys, readTicketsFromKeys, norm };

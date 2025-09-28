@@ -1,0 +1,21 @@
+[
+  {"user":"soporte","pass":"SITYPS2025!","role":"soporte","displayName":"Soporte Técnico","puesto":"Soporte"},
+  {"user":"laura","pass":"SITYPS2025!","role":"admin","displayName":"Laura Cerqueda de la Rosa","puesto":"Secretaria General"},
+  {"user":"fredi","pass":"SITYPS2025!","role":"afiliacion","displayName":"Fredi Fernando Vázquez Aguilar","puesto":"Secretaría de Organización, Actas y Acuerdos"},
+  {"user":"carlos","pass":"SITYPS2025!","role":"laborales","displayName":"Carlos Alberto Ramírez Cruz","puesto":"Secretaría de Asuntos Laborales"},
+  {"user":"eduardo","pass":"SITYPS2025!","role":"formacion","displayName":"Eduardo Escobar Vázquez","puesto":"Secretaría de Formación, Capacitación y Desarrollo Profesional"},
+  {"user":"otoniel","pass":"SITYPS2025!","role":"escalafon","displayName":"Otoniel Gerson Solano Talledos","puesto":"Secretaría de Escalafón y Promoción de Plazas"},
+  {"user":"saidel","pass":"SITYPS2025!","role":"prestaciones","displayName":"Saidel Mateos Vicente","puesto":"Secretaría de Créditos, Vivienda y Prestaciones Económicas"},
+  {"user":"gabriel","pass":"SITYPS2025!","role":"prensa","displayName":"Gabriel Alberto Cardeño Maldonado","puesto":"Secretaría de Relaciones, Prensa y Propaganda"},
+  {"user":"lidia","pass":"SITYPS2025!","role":"finanzas","displayName":"Lidia Elisa Olivares Hernández","puesto":"Secretaría de Finanzas"},
+  {"user":"beatriz","pass":"SITYPS2025!","role":"cultura","displayName":"Beatriz Adriana Castellanos López","puesto":"Secretaría de Fomento Cultural y Deportivo"},
+  {"user":"petra","pass":"SITYPS2025!","role":"equidad","displayName":"Petra Remedios Hernández Velasco","puesto":"Secretaría de la Mujer y Equidad de Género"},
+  {"user":"juan","pass":"SITYPS2025!","role":"honor-justicia","displayName":"Juan Altamirano Vázquez","puesto":"Presidente Comité de Honor y Justicia"},
+  {"user":"eva","pass":"SITYPS2025!","role":"electoral","displayName":"Eva Sánchez Pérez","puesto":"Presidente Comité Electoral"},
+  {"user":"david","pass":"SITYPS2025!","role":"region-tuxtepec","displayName":"David Avendaño Martínez","puesto":"Representante Regional Tuxtepec"},
+  {"user":"rocio","pass":"SITYPS2025!","role":"region-tuxtepec","displayName":"Rocío Felipe Hernández","puesto":"Representante Regional Tuxtepec"},
+  {"user":"adolfo","pass":"SITYPS2025!","role":"region-pochutla","displayName":"Adolfo Ramos Castillo","puesto":"Representante Regional Pochutla"},
+  {"user":"elsa","pass":"SITYPS2025!","role":"region-pochutla","displayName":"Elsa Aurora Sánchez Martínez","puesto":"Representante Regional Pochutla"},
+  {"user":"rebeca","pass":"SITYPS2025!","role":"region-valle-centrales","displayName":"Rebeca Reyes Hernández","puesto":"Representante Regional Valles Centrales"},
+  {"user":"cirilo","pass":"SITYPS2025!","role":"region-valle-centrales","displayName":"Cirilo Ansberto Aquino Torres","puesto":"Representante Regional Valles Centrales"}
+]

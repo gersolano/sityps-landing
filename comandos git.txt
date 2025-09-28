@@ -1,4 +1,30 @@
 
+# deploy Desde la RAÍZ del proyecto
+npm i
+npm run build
+netlify deploy --prod --dir=dist --functions=netlify/functions --skip-functions-cache
+
+
+
+
+
+
+
+
+# 1) Guardar el archivo
+git add src/pages/Asistencia.jsx
+git commit -m "fix(asistencia): validación acuse RH en tiempo real + mejoras UX"
+
+# 2) Build local (opcional)
+npm run build
+
+# 3) Desplegar a producción en Netlify (con funciones sin caché si tocaste serverless)
+netlify deploy --prod --dir=dist --functions=netlify/functions --skip-functions-cache
+
+
+
+
+
 git remote remove origin 2>$null
 git remote add origin https://github.com/gersolano/sityps-landing.git
 git push -u origin main
@@ -37,3 +63,25 @@ o initialize a new git repo follow the steps below.
 7. Initialize your Netlify Site
 
    netlify init
+
+
+token netlify
+nfp_BfKFKfnaYzaZBUTjzYBFxULjybK1zh7ac0cc
+
+onst name = process.env.BLOBS_STORE_NAME || 'sityps';
+  const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+  const token  = process.env.NETLIFY_API_TOKEN 
+
+
+
+BLOBS_STORE_NAME=sityps
+NETLIFY_SITE_ID=d8e36c38-1378-4209-aaa0-c1d434c1fb6b
+NETLIFY_API_TOKEN=nfp_BfKFKfnaYzaZBUTjzYBFxULjybK1zh7ac0cc
+
+
+
+
+
+
+
+

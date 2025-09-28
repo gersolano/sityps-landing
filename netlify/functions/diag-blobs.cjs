@@ -1,27 +1,30 @@
 'use strict';
+const { getBlobsStore } = require('./_blobs.cjs');
 
-const { makeStore, STORE_NAME } = require('./_store.cjs');
-
-exports.handler = async () => {
+exports.handler = async (event) => {
   try {
-    const store = await makeStore();
-    const key = `diag/${Date.now()}.json`;
-    await store.setJSON(key, { ok: true, when: new Date().toISOString() });
+    const url = new URL(event.rawUrl || `http://x${event.path}`);
+    const storeName = (url.searchParams.get('store') || process.env.BLOBS_STORE_NAME || 'tickets').trim();
+    const prefix    = (url.searchParams.get('prefix') || process.env.BLOBS_PREFIX || 'tickets/').trim();
 
-    // Intentamos listar el prefijo diag/
-    const items = [];
-    for await (const e of store.list({ prefix: 'diag/' })) items.push(e.key);
+    const store = await getBlobsStore(storeName);
+
+    // listar máx 20 para muestra
+    const res = await store.list({ prefix, limit: 20 });
+    let sample = [];
+    if (Array.isArray(res)) sample = res.map(e => e?.key || e?.name || e?.path).filter(Boolean);
+    else if (res && Array.isArray(res.items)) sample = res.items.map(e => e?.key || e?.name || e?.path).filter(Boolean);
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, store: STORE_NAME, wrote: key, listed: items.slice(-5) }),
-      headers: { 'content-type': 'application/json' }
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ ok: true, store: storeName, prefix, count: sample.length, sample }, null, 2),
     };
   } catch (e) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ ok: false, name: e.name, message: e.message }),
-      headers: { 'content-type': 'application/json' }
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ ok: false, error: String(e && e.message || e) }, null, 2),
     };
   }
 };

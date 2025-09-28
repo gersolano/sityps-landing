@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@netlify/blobs": "^10.0.10",
+    "@netlify/blobs": "^6.5.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^7.0.6",
     "react": "^19.1.1",

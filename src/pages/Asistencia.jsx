@@ -1,7 +1,8 @@
 // src/pages/Asistencia.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { filesToAttachments } from "../lib/attachments";
 
-/* Catálogos */
+/* ===== Catálogos ===== */
 const SECRETARIAS = [
   "Secretaría General",
   "Secretaria de Organización, actas y acuerdos",
@@ -25,34 +26,27 @@ const INSTITUCIONES = [
 ];
 
 const EVENTOS = [
-  "Asamblea",
-  "Plenos",
-  "Cursos",
-  "Capacitación",
-  "Comisión",
-  "Gestión sindical",
-  "Reunión con autoridad",
-  "Movilización",
-  "Otro",
+  "Asamblea","Plenos","Cursos","Capacitación","Comisión",
+  "Gestión sindical","Reunión con autoridad","Movilización","Otro",
 ];
 
 const TIPO_SOLICITUD = [
-  "Facilidades administrativas",
-  "Afiliación",
-  "Conflicto laboral",
-  "Consulta general",
-  "Otro",
+  "Facilidades administrativas","Afiliación","Conflicto laboral","Consulta general","Otro",
 ];
 
-// Helpers UI
+/* ===== Helpers UI ===== */
 const cx = (...k) => k.filter(Boolean).join(" ");
 const baseInput =
   "w-full rounded-md border bg-white px-3 py-2 outline-none border-slate-300 focus:ring-2 focus:ring-red-300";
 const errInput = "border-red-500 ring-1 ring-red-400 focus:ring-red-400";
 const errStyle = (on) => (on ? { borderColor: "#ef4444", boxShadow: "0 0 0 1px #fca5a5 inset" } : undefined);
 
-// LocalStorage
+/* ===== LocalStorage ===== */
 const PROFILE_KEY = "asistencia_profile_v1";
+
+/* ===== API ===== */
+const API_CREATE = "/.netlify/functions/tickets-create";
+const API_ACUSE  = "/.netlify/functions/acuse-upload"; // opcional
 
 export default function Asistencia() {
   const [alert, setAlert] = useState(null); // {type:'ok'|'error', msg}
@@ -62,7 +56,7 @@ export default function Asistencia() {
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [unidad, setUnidad] = useState("");
+  const [unidad, setUnidad] = useState(""); // adscripción
   const [curp, setCurp] = useState("");
   const [rfc, setRfc] = useState("");
 
@@ -79,13 +73,14 @@ export default function Asistencia() {
   const [fini, setFini] = useState("");
   const [ffin, setFfin] = useState("");
 
-  // acuse RH (opcional recomendado)
+  // acuse RH (opcional)
   const [acuseKey, setAcuseKey] = useState("");
   const [acuseName, setAcuseName] = useState("");
   const [acuseUploading, setAcuseUploading] = useState(false);
   const [acuseConfirm, setAcuseConfirm] = useState(false);
+  const [acuseFile, setAcuseFile] = useState(null);
 
-  // adjuntos globales
+  // adjuntos
   const [adjuntos, setAdjuntos] = useState([]);
   const [adjuntosInfo, setAdjuntosInfo] = useState([]); // {name,size}
 
@@ -96,11 +91,15 @@ export default function Asistencia() {
   const [errs, setErrs] = useState({});
   const refs = useRef({});
 
-  const isFacilidades = useMemo(
-    () => tipo === "Facilidades administrativas",
-    [tipo]
-  );
+  const isFacilidades = useMemo(() => tipo === "Facilidades administrativas", [tipo]);
   const diasNum = useMemo(() => Number(dias || 0), [dias]);
+
+  // Al elegir "Facilidades administrativas" fijamos la secretaría:
+  useEffect(() => {
+    if (isFacilidades) {
+      setModulo("Secretaria de Organización, actas y acuerdos");
+    }
+  }, [isFacilidades]);
 
   // Cargar perfil
   useEffect(() => {
@@ -118,40 +117,34 @@ export default function Asistencia() {
     } catch {}
   }, []);
 
-  // Guardar perfil (datos de contacto) al vuelo
+  // Guardar perfil al vuelo
   useEffect(() => {
     const p = { nombre, correo, telefono, unidad, curp, rfc };
-    try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
-    } catch {}
+    try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {}
   }, [nombre, correo, telefono, unidad, curp, rfc]);
 
   async function onAcuseChange(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) { setAcuseFile(null); return; }
     if (file.size > 4 * 1024 * 1024) {
       setAlert({ type: "error", msg: "El acuse debe pesar máximo 4 MB." });
       return;
     }
-    setAcuseUploading(true);
-    setAlert(null);
+    setAcuseFile(file);
+    setAcuseName(file.name);
+
     try {
+      setAcuseUploading(true);
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch("/.netlify/functions/acuse-upload", {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(API_ACUSE, { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "No se pudo subir el acuse.");
-
       setAcuseKey(data.key || "");
-      setAcuseName(file.name);
       setAlert({ type: "ok", msg: "Acuse subido correctamente." });
-    } catch (err) {
+    } catch {
+      // aunque falle la subida, se adjuntará por correo
       setAcuseKey("");
-      setAcuseName("");
-      setAlert({ type: "error", msg: String(err.message || err) });
     } finally {
       setAcuseUploading(false);
     }
@@ -185,17 +178,13 @@ export default function Asistencia() {
         if (!req(ffin)) next.ffin = "Fecha final requerida.";
       }
       if (!acuseConfirm) next.acuseConfirm = "Debes confirmar que entregaste el acuse a RH.";
-      // Si quieres forzar archivo:
-      // if (!acuseKey) next.acuseConfirm = "Adjunta el acuse de RH.";
     }
 
     setErrs(next);
-
     const firstKey = Object.keys(next)[0];
     if (firstKey && refs.current[firstKey]) {
       refs.current[firstKey].scrollIntoView({ behavior: "smooth", block: "center" });
     }
-
     if (Object.keys(next).length) {
       setAlert({ type: "error", msg: "Revisa los campos marcados en rojo." });
       return false;
@@ -209,105 +198,73 @@ export default function Asistencia() {
     e.preventDefault();
     if (!validate()) return;
 
-    const payload = {
-      nombre,
-      correo,
-      telefono,
-      unidad,
-      curp,
-      rfc,
-      modulo,
-      tipo,
-      descripcion,
-      facilidades: isFacilidades
-        ? {
-            institucion: inst,
-            evento,
-            cantidadSolicitantes: Number(cantSolic || 0),
-            diasSolicitados: diasNum,
-            fecha: diasNum === 1 ? fecha : null,
-            periodo: diasNum > 1 ? { desde: fini, hasta: ffin } : null,
-            acuseKey,
-            acuseName,
-            acuseConfirm,
-          }
-        : null,
-      adjuntos: adjuntosInfo,
-    };
-
     try {
-      const res = await fetch("/.netlify/functions/tickets-create", {
+      const attachments = await filesToAttachments(adjuntos);
+
+      if (acuseFile) {
+        const [acuseAtt] = await filesToAttachments([acuseFile]);
+        if (acuseAtt) attachments.push(acuseAtt);
+      }
+
+      const payload = {
+        nombre, correo, telefono,
+        adscripcion: unidad,
+        curp, rfc,
+        modulo,           // secretaría destino (ya fijada para Facilidades)
+        tipo,             // tipo de solicitud
+        descripcion,
+        facilidades: isFacilidades
+          ? {
+              institucion: inst,
+              evento,
+              cantidadSolicitantes: Number(cantSolic || 0),
+              diasSolicitados: Number(dias || 0),
+              fecha: Number(dias) === 1 ? fecha : null,
+              periodo: Number(dias) > 1 ? { desde: fini, hasta: ffin } : null,
+              acuseKey, acuseName, acuseConfirm,
+            }
+          : null,
+        attachments,       // adjuntos al correo de “nuevo ticket”
+      };
+
+      const res = await fetch(API_CREATE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "No se pudo guardar el ticket.");
+      if (!res.ok || data?.ok === false) throw new Error(data?.error || "No se pudo guardar el ticket.");
 
       setFolioOK(data.folio || "T-XXXX");
       setAlert({ type: "ok", msg: `¡Ticket registrado! Folio: ${data.folio}` });
 
-      // Limpiar (para NUEVA asistencia). Conservamos los datos de contacto.
-      setModulo("");
-      setTipo("");
-      setDescripcion("");
-      setAdjuntos([]);
-      setAdjuntosInfo([]);
-
-      if (isFacilidades) {
-        setAcuseKey("");
-        setAcuseName("");
-        setAcuseConfirm(false);
-        setFecha("");
-        setFini("");
-        setFfin("");
-        setDias("1");
-        setCantSolic("1");
-        setEvento("Capacitación");
-        setInst(INSTITUCIONES[0]);
-      }
+      // limpiar (conservamos datos de contacto)
+      setTipo(""); setDescripcion("");
+      setAdjuntos([]); setAdjuntosInfo([]);
+      setAcuseKey(""); setAcuseName(""); setAcuseConfirm(false); setAcuseFile(null);
+      setFecha(""); setFini(""); setFfin(""); setDias("1"); setCantSolic("1"); setEvento("Capacitación");
+      if (!isFacilidades) setModulo("");
     } catch (err) {
       setAlert({ type: "error", msg: String(err.message || err) });
     }
   }
 
-  // Reset TOTAL + borrar perfil
   function resetAll() {
-    setNombre("");
-    setCorreo("");
-    setTelefono("");
-    setUnidad("");
-    setCurp("");
-    setRfc("");
-    setModulo("");
-    setTipo("");
-    setDescripcion("");
-    setAdjuntos([]);
-    setAdjuntosInfo([]);
-    setInst(INSTITUCIONES[0]);
-    setEvento("Capacitación");
-    setCantSolic("1");
-    setDias("1");
-    setFecha("");
-    setFini("");
-    setFfin("");
-    setAcuseKey("");
-    setAcuseName("");
-    setAcuseConfirm(false);
+    setNombre(""); setCorreo(""); setTelefono(""); setUnidad(""); setCurp(""); setRfc("");
+    setModulo(""); setTipo(""); setDescripcion("");
+    setAdjuntos([]); setAdjuntosInfo([]);
+    setInst(INSTITUCIONES[0]); setEvento("Capacitación");
+    setCantSolic("1"); setDias("1"); setFecha(""); setFini(""); setFfin("");
+    setAcuseKey(""); setAcuseName(""); setAcuseConfirm(false); setAcuseFile(null);
     try { localStorage.removeItem(PROFILE_KEY); } catch {}
   }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {alert && (
-        <div
-          className={cx(
-            "mb-6 rounded border px-4 py-3",
-            alert.type === "error"
-              ? "bg-red-50 border-red-200 text-red-700"
-              : "bg-emerald-50 border-emerald-200 text-emerald-700"
-          )}
-        >
+        <div className={cx("mb-6 rounded border px-4 py-3",
+          alert.type === "error" ? "bg-red-50 border-red-200 text-red-700"
+                                 : "bg-emerald-50 border-emerald-200 text-emerald-700")}>
           {alert.msg}
         </div>
       )}
@@ -315,16 +272,10 @@ export default function Asistencia() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">Mesa de Asistencia</h1>
-          <p className="text-slate-600 mb-4">
-            ¿Tienes una solicitud o problema? Registra tu ticket y el equipo correspondiente te atenderá.
-          </p>
+          <p className="text-slate-600 mb-4">¿Tienes una solicitud o problema? Registra tu ticket y el equipo correspondiente te atenderá.</p>
         </div>
-        <button
-          type="button"
-          onClick={resetAll}
-          className="h-10 shrink-0 rounded-md border px-4 font-medium hover:bg-slate-50"
-          title="Borrar todos los campos y el autocompletado"
-        >
+        <button type="button" onClick={resetAll}
+          className="h-10 shrink-0 rounded-md border px-4 font-medium hover:bg-slate-50">
           Limpiar todo
         </button>
       </div>
@@ -334,55 +285,20 @@ export default function Asistencia() {
         <section>
           <h2 className="text-xl font-semibold mb-4">Datos de contacto</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <div ref={(el) => (refs.current.nombre = el)}>
-              <input
-                id="nombre"
-                className={cx(baseInput, errs.nombre && errInput)}
-                style={errStyle(!!errs.nombre)}
-                placeholder="Nombre completo"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-              />
+            <div ref={(el)=>(refs.current.nombre=el)}>
+              <input id="nombre" className={cx(baseInput, errs.nombre && errInput)} style={errStyle(!!errs.nombre)}
+                placeholder="Nombre completo" value={nombre} onChange={(e)=>setNombre(e.target.value)} />
               {errs.nombre && <p className="text-sm text-red-600 mt-1">{errs.nombre}</p>}
             </div>
-
-            <div ref={(el) => (refs.current.correo = el)}>
-              <input
-                id="correo"
-                type="email"
-                className={cx(baseInput, errs.correo && errInput)}
-                style={errStyle(!!errs.correo)}
-                placeholder="Correo"
-                value={correo}
-                onChange={(e) => setCorreo(e.target.value)}
-              />
+            <div ref={(el)=>(refs.current.correo=el)}>
+              <input id="correo" type="email" className={cx(baseInput, errs.correo && errInput)} style={errStyle(!!errs.correo)}
+                placeholder="Correo" value={correo} onChange={(e)=>setCorreo(e.target.value)} />
               {errs.correo && <p className="text-sm text-red-600 mt-1">{errs.correo}</p>}
             </div>
-
-            <input
-              className={baseInput}
-              placeholder="Teléfono"
-              value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-            />
-            <input
-              className={baseInput}
-              placeholder="Unidad de adscripción (opcional)"
-              value={unidad}
-              onChange={(e) => setUnidad(e.target.value)}
-            />
-            <input
-              className={baseInput}
-              placeholder="CURP (opcional)"
-              value={curp}
-              onChange={(e) => setCurp(e.target.value)}
-            />
-            <input
-              className={baseInput}
-              placeholder="RFC (opcional)"
-              value={rfc}
-              onChange={(e) => setRfc(e.target.value)}
-            />
+            <input className={baseInput} placeholder="Teléfono" value={telefono} onChange={(e)=>setTelefono(e.target.value)} />
+            <input className={baseInput} placeholder="Unidad de adscripción (opcional)" value={unidad} onChange={(e)=>setUnidad(e.target.value)} />
+            <input className={baseInput} placeholder="CURP (opcional)" value={curp} onChange={(e)=>setCurp(e.target.value)} />
+            <input className={baseInput} placeholder="RFC (opcional)" value={rfc} onChange={(e)=>setRfc(e.target.value)} />
           </div>
         </section>
 
@@ -390,36 +306,30 @@ export default function Asistencia() {
         <section>
           <h2 className="text-xl font-semibold mb-4">Clasificación</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <div ref={(el) => (refs.current.modulo = el)}>
+            <div ref={(el)=>(refs.current.modulo=el)}>
               <select
                 className={cx(baseInput, errs.modulo && errInput)}
                 style={errStyle(!!errs.modulo)}
                 value={modulo}
-                onChange={(e) => setModulo(e.target.value)}
+                onChange={(e)=>setModulo(e.target.value)}
+                disabled={isFacilidades} /* Facilidades → bloqueado en Organización */
               >
                 <option value="">Secretaría / Módulo destino</option>
-                {SECRETARIAS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {SECRETARIAS.map((s)=>(<option key={s} value={s}>{s}</option>))}
               </select>
+              {isFacilidades && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Para <b>Facilidades administrativas</b> la secretaría se asigna a
+                  <b> “Secretaria de Organización, actas y acuerdos”</b>.
+                </p>
+              )}
               {errs.modulo && <p className="text-sm text-red-600 mt-1">{errs.modulo}</p>}
             </div>
-
-            <div ref={(el) => (refs.current.tipo = el)}>
-              <select
-                className={cx(baseInput, errs.tipo && errInput)}
-                style={errStyle(!!errs.tipo)}
-                value={tipo}
-                onChange={(e) => setTipo(e.target.value)}
-              >
+            <div ref={(el)=>(refs.current.tipo=el)}>
+              <select className={cx(baseInput, errs.tipo && errInput)} style={errStyle(!!errs.tipo)}
+                value={tipo} onChange={(e)=>setTipo(e.target.value)}>
                 <option value="">Tipo de solicitud</option>
-                {TIPO_SOLICITUD.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
+                {TIPO_SOLICITUD.map((t)=>(<option key={t} value={t}>{t}</option>))}
               </select>
               {errs.tipo && <p className="text-sm text-red-600 mt-1">{errs.tipo}</p>}
             </div>
@@ -430,100 +340,52 @@ export default function Asistencia() {
         {isFacilidades && (
           <section className="rounded-lg border p-4 md:p-6">
             <h3 className="font-semibold mb-4">Facilidades administrativas</h3>
-
             <div className="grid md:grid-cols-2 gap-4">
-              <div ref={(el) => (refs.current.inst = el)}>
-                <select
-                  className={cx(baseInput, errs.inst && errInput)}
-                  style={errStyle(!!errs.inst)}
-                  value={inst}
-                  onChange={(e) => setInst(e.target.value)}
-                >
-                  {INSTITUCIONES.map((i) => (
-                    <option key={i} value={i}>
-                      {i}
-                    </option>
-                  ))}
+              <div ref={(el)=>(refs.current.inst=el)}>
+                <select className={cx(baseInput, errs.inst && errInput)} style={errStyle(!!errs.inst)}
+                  value={inst} onChange={(e)=>setInst(e.target.value)}>
+                  {INSTITUCIONES.map((i)=>(<option key={i} value={i}>{i}</option>))}
                 </select>
                 {errs.inst && <p className="text-sm text-red-600 mt-1">{errs.inst}</p>}
               </div>
-
-              <input
-                className={baseInput}
-                type="number"
-                min="1"
-                value={cantSolic}
-                onChange={(e) => setCantSolic(e.target.value)}
-                placeholder="Cantidad de solicitantes"
-              />
-
-              <div ref={(el) => (refs.current.evento = el)}>
-                <select
-                  className={cx(baseInput, errs.evento && errInput)}
-                  style={errStyle(!!errs.evento)}
-                  value={evento}
-                  onChange={(e) => setEvento(e.target.value)}
-                >
-                  {EVENTOS.map((ev) => (
-                    <option key={ev} value={ev}>
-                      {ev}
-                    </option>
-                  ))}
+              <input className={baseInput} type="number" min="1" value={cantSolic}
+                onChange={(e)=>setCantSolic(e.target.value)} placeholder="Cantidad de solicitantes" />
+              <div ref={(el)=>(refs.current.evento=el)}>
+                <select className={cx(baseInput, errs.evento && errInput)} style={errStyle(!!errs.evento)}
+                  value={evento} onChange={(e)=>setEvento(e.target.value)}>
+                  {EVENTOS.map((ev)=>(<option key={ev} value={ev}>{ev}</option>))}
                 </select>
                 {errs.evento && <p className="text-sm text-red-600 mt-1">{errs.evento}</p>}
               </div>
-
-              <div ref={(el) => (refs.current.dias = el)}>
-                <input
-                  className={cx(baseInput, errs.dias && errInput)}
-                  style={errStyle(!!errs.dias)}
-                  type="number"
-                  min="1"
-                  value={dias}
-                  onChange={(e) => setDias(e.target.value)}
-                  placeholder="Número de días solicitados"
-                />
+              <div ref={(el)=>(refs.current.dias=el)}>
+                <input className={cx(baseInput, errs.dias && errInput)} style={errStyle(!!errs.dias)}
+                  type="number" min="1" value={dias} onChange={(e)=>setDias(e.target.value)}
+                  placeholder="Número de días solicitados" />
                 {errs.dias && <p className="text-sm text-red-600 mt-1">{errs.dias}</p>}
               </div>
-
-              {diasNum === 1 ? (
-                <div className="md:col-span-2" ref={(el) => (refs.current.fecha = el)}>
-                  <input
-                    className={cx(baseInput, errs.fecha && errInput)}
-                    style={errStyle(!!errs.fecha)}
-                    type="date"
-                    value={fecha}
-                    onChange={(e) => setFecha(e.target.value)}
-                  />
+              {Number(dias) === 1 ? (
+                <div className="md:col-span-2" ref={(el)=>(refs.current.fecha=el)}>
+                  <input className={cx(baseInput, errs.fecha && errInput)} style={errStyle(!!errs.fecha)}
+                    type="date" value={fecha} onChange={(e)=>setFecha(e.target.value)} />
                   {errs.fecha && <p className="text-sm text-red-600 mt-1">{errs.fecha}</p>}
                 </div>
               ) : (
                 <>
-                  <div ref={(el) => (refs.current.fini = el)}>
-                    <input
-                      className={cx(baseInput, errs.fini && errInput)}
-                      style={errStyle(!!errs.fini)}
-                      type="date"
-                      value={fini}
-                      onChange={(e) => setFini(e.target.value)}
-                    />
+                  <div ref={(el)=>(refs.current.fini=el)}>
+                    <input className={cx(baseInput, errs.fini && errInput)} style={errStyle(!!errs.fini)}
+                      type="date" value={fini} onChange={(e)=>setFini(e.target.value)} />
                     {errs.fini && <p className="text-sm text-red-600 mt-1">{errs.fini}</p>}
                   </div>
-                  <div ref={(el) => (refs.current.ffin = el)}>
-                    <input
-                      className={cx(baseInput, errs.ffin && errInput)}
-                      style={errStyle(!!errs.ffin)}
-                      type="date"
-                      value={ffin}
-                      onChange={(e) => setFfin(e.target.value)}
-                    />
+                  <div ref={(el)=>(refs.current.ffin=el)}>
+                    <input className={cx(baseInput, errs.ffin && errInput)} style={errStyle(!!errs.ffin)}
+                      type="date" value={ffin} onChange={(e)=>setFfin(e.target.value)} />
                     {errs.ffin && <p className="text-sm text-red-600 mt-1">{errs.ffin}</p>}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Acuse RH (opcional + confirmación obligatoria) */}
+            {/* Acuse RH */}
             <div className="mt-4 grid md:grid-cols-2 gap-4 items-start">
               <div>
                 <label className="block text-sm text-slate-600 mb-1">
@@ -531,61 +393,40 @@ export default function Asistencia() {
                 </label>
                 <input type="file" accept=".pdf,image/*" onChange={onAcuseChange} />
                 <p className="text-sm mt-1">
-                  {acuseUploading
-                    ? "Subiendo acuse…"
-                    : acuseName
-                    ? `Archivo: ${acuseName}`
-                    : "Puedes adjuntar el acuse aquí (recomendado)."}
+                  {acuseUploading ? "Subiendo acuse…"
+                    : acuseName ? `Archivo: ${acuseName}` : "Puedes adjuntar el acuse aquí (recomendado)."}
                 </p>
               </div>
-
-              <div ref={(el) => (refs.current.acuseConfirm = el)} className="mt-2">
+              <div ref={(el)=>(refs.current.acuseConfirm=el)} className="mt-2">
                 <label className="inline-flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={acuseConfirm}
-                    onChange={(e) => setAcuseConfirm(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={acuseConfirm} onChange={(e)=>setAcuseConfirm(e.target.checked)} />
                   <span>Confirmo que ya entregué el acuse a RH.</span>
                 </label>
-                {errs.acuseConfirm && (
-                  <p className="text-sm text-red-600 mt-1">{errs.acuseConfirm}</p>
-                )}
+                {errs.acuseConfirm && <p className="text-sm text-red-600 mt-1">{errs.acuseConfirm}</p>}
               </div>
             </div>
           </section>
         )}
 
         {/* Descripción */}
-        <section ref={(el) => (refs.current.descripcion = el)}>
+        <section ref={(el)=>(refs.current.descripcion=el)}>
           <h2 className="text-xl font-semibold mb-2">Descripción</h2>
-          <textarea
-            className={cx(baseInput, "min-h-[220px]", errs.descripcion && errInput)}
-            style={errStyle(!!errs.descripcion)}
-            placeholder="Describe brevemente tu solicitud o problema…"
-            value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
-          />
-          {errs.descripcion && (
-            <p className="text-sm text-red-600 mt-1">{errs.descripcion}</p>
-          )}
+          <textarea className={cx(baseInput, "min-h-[220px]", errs.descripcion && errInput)}
+            style={errStyle(!!errs.descripcion)} placeholder="Describe brevemente tu solicitud o problema…"
+            value={descripcion} onChange={(e)=>setDescripcion(e.target.value)} />
+          {errs.descripcion && <p className="text-sm text-red-600 mt-1">{errs.descripcion}</p>}
         </section>
 
         {/* Adjuntos generales */}
         <section>
           <h2 className="text-xl font-semibold mb-2">Adjuntar archivos</h2>
-          <input multiple type="file" onChange={onAdjuntosChange} />
+          <input multiple type="file" onChange={(e)=>{ const fs = Array.from(e.target.files||[]); setAdjuntos(fs); setAdjuntosInfo(fs.map(f=>({name:f.name,size:f.size}))); }} />
           {!!adjuntosInfo.length && (
-            <div className="text-sm text-slate-600 mt-2">
-              {adjuntosInfo.length} archivo(s) seleccionado(s).
-            </div>
+            <div className="text-sm text-slate-600 mt-2">{adjuntosInfo.length} archivo(s) seleccionado(s).</div>
           )}
         </section>
 
-        <button
-          type="submit"
-          className="inline-flex items-center justify-center rounded-md bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 font-medium"
-        >
+        <button type="submit" className="inline-flex items-center justify-center rounded-md bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 font-medium">
           Registrar ticket
         </button>
       </form>
@@ -597,10 +438,7 @@ export default function Asistencia() {
             <h4 className="text-xl font-semibold mb-2">¡Ticket registrado!</h4>
             <p className="mb-6">Tu folio es <b>{folioOK}</b>.</p>
             <div className="text-right">
-              <button
-                onClick={() => setFolioOK("")}
-                className="rounded-md bg-slate-800 hover:bg-slate-900 text-white px-4 py-2"
-              >
+              <button onClick={()=>setFolioOK("")} className="rounded-md bg-slate-800 hover:bg-slate-900 text-white px-4 py-2">
                 Nueva solicitud
               </button>
             </div>

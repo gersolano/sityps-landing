@@ -22,10 +22,9 @@ export default function Home() {
             </div>
 
             <p className="mt-6 max-w-3xl text-white/90">
-              Bienvenidas y bienvenidos al sitio oficial del SITYPS. Somos una organización
-              democrática al servicio de las y los trabajadores del sector salud,
-              pública y privadamente.
-            </p>
+              En nombre del Sindicato Independiente de Trabajadores y Profesionales en Salud (SITYPS), nos complace darte la más cordial bienvenida, al mismo tiempo te felicitamos porque desde hoy formas parte de nuestra familia SITYPS.
+Somos una organización sindical legalmente constituida, con toma de nota y número de registro 626 expedido por la Junta Local de Conciliación y Arbitraje del Estado de Oaxaca, Constituida el 15 de febrero de 2012, con personalidad jurídica a partir de 05 de julio de 2013; caracterizándose por desempeñar las actividades sindicales dentro del marco del derecho y formada por compañeras(os) preparados para brindar una atención de calidad y calidez, teniendo representación en el Organismo Público Descentralizado, denominado Servicios de Salud de Oaxaca (SSO), IMSS BIENESTAR y demás Dependencias Públicas y Privadas del sector salud.
+Trabajador de Base, Regularizado, Formalizado, Base Confianza, Regularizado Confianza, Homologado, Precario, Estatal, Eventual y trabajador de IMSS-BIENESTAR, ¡Te esperamos en el SITYPS!</p>
 
             <div className="mt-6 flex gap-3">
               <a
@@ -50,7 +49,7 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-6">
           {[
             {
-              title: "Afiliación",
+              title: "Afiliados",
               img: "/img/afiliacion.jpg",
               text: "Acompañamiento y defensa de tus derechos.",
             },

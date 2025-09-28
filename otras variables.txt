@@ -1,0 +1,41 @@
+TICKETS_TO_AFI → Afiliación (Organización Actas y Acuerdos)
+
+TICKETS_TO_FIN → Finanzas
+
+TICKETS_TO_DEM → Demandas laborales
+
+TICKETS_TO_FOR → Formación/Capacitación
+
+TICKETS_TO_ESC → Escalafón
+
+TICKETS_TO_PRE → Prestaciones
+
+TICKETS_TO_PRN → Prensa/Propaganda
+
+TICKETS_TO_CON → Consultorios
+
+TICKETS_TO_DPC → Deporte/Cultura
+
+TICKETS_TO_HON → Honor y Justicia
+
+TICKETS_TO_ELE → Electoral
+
+TICKETS_TO_REG → Representantes Regionales
+
+TICKETS_TO_SOP → Soporte
+
+SMTP_FROM
+
+TO_AFILIACION
+TO_LABORALES
+TO_FINANZAS
+TO_FORMACION
+TO_ESCALAFON
+TO_PRESTACIONES
+TO_PRENSA
+TO_CULTURA
+TO_EQUIDAD
+TO_HONOR_JUSTICIA
+TO_ELECTORAL
+TO_CONSULTORIOS
+TO_SOPORTE
